@@ -31,6 +31,8 @@ At the top, Claude's brain (orange, left) and MAC's brain (blue, right). A bolt 
 - **Red bolt with a white-hot core:** anything BLOCKED, or a job that errored.
 - **Faint steady arc:** a MAC job is running right now.
 
+The brains are Codex's artwork (`brain/static/media/*-brain.png`), or Runway idle loops (`*-loop.mp4`) when present; the page falls back to drawing its own. Either side has a HUD panel: Claude's 24 h outcomes, latest jobs and a hex grid of the last 60 jobs on the left; MAC's open-order age radar, counters, 24 h traffic chart and open orders on the right. Every shape in them is real data; hover or click for the item.
+
 Hover a bolt, or a line in "Latest messages", to see the message. Messages that existed before the page opened don't fire. `http://localhost:8777/?demo` shows labeled sample bolts for checking the look; they are not real messages.
 
 | Panel | Where it comes from |
@@ -52,6 +54,10 @@ Job states, in plain words:
 - **No Claude run**: a brief exists but no Claude run started (for example a Codex job).
 
 Costs shown on jobs are Claude's own list-price estimates from the result files, not charges. The Max plan doesn't bill per job.
+
+## MAC's message log
+
+MAC (Grok Bot) can append one line per MAC/Claude message to `~/.vader-mac-runs/brain/comms.jsonl`, which gives exact times and covers work on Grok Bot's computer and the Windows machine. The format and instructions for MAC are in [docs/GROKBOT-COMMS-LOG.md](docs/GROKBOT-COMMS-LOG.md). Without it, the Brain works from the files it already reads.
 
 ## Obsidian notes
 
