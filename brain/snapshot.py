@@ -147,17 +147,19 @@ def _comms_evidence(job: dict, comms: List[dict], since: str) -> List[tuple]:
     return found
 
 
-def apply_followups(folders: List[dict], entries: List[dict], comms: List[dict]) -> None:
-    """Clear a stuck job when MAC says it's resolved after the report.
+def apply_followups(jobs: List[dict], entries: List[dict], comms: List[dict]) -> None:
+    """Clear a stuck job (folder or one-shot) when MAC says it's resolved after the report.
+
+    For a one-shot with no result, MAC's word only counts after the order was sent.
 
     MAC often fixes things outside the job folder (a commit or merge in the repo) and says so in the
     STATUS.md change log, or logs kind "unblocked" in comms.jsonl. The newest such word decides:
     resolved wording clears the job; still-open wording (blocked, awaiting, pending) keeps it as is.
     """
-    for job in folders:
+    for job in jobs:
         if job["state"] not in STUCK_STATES and job["state"] != "followed_up":
             continue
-        since = job.get("report_at") or job.get("stream_updated_at") or ""
+        since = job.get("report_at") or job.get("stream_updated_at") or job.get("sent_at") or ""
         evidence = _status_evidence(job, entries, since) + _comms_evidence(job, comms, since)
         if not evidence:
             continue
@@ -182,7 +184,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     comms, comms_skipped = cache.get(
         comms_path(cfg.runs_dir), "comms", lambda p: parse_comms(read_tail(p, COMMS_TAIL) or "")
     )
-    apply_followups(folders, status.get("entries", []), comms)
+    apply_followups(folders + oneshots, status.get("entries", []), comms)
     # One flag the page trusts for fix-request buttons, so the rule lives in one place.
     for job in folders + oneshots:
         job.update(job_action(job))

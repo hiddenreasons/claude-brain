@@ -130,6 +130,22 @@ def _local(minutes_ago):
     return (datetime.now() - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M")
 
 
+def test_dated_lines_mac_appends_below_a_later_heading_still_count_as_change_log():
+    text = (
+        "## 5. Open decisions awaiting Anthony\n\n- One.\n\n"
+        "## 6. Change log\n\n- 2026-10-09 14:40 VADER c3: first.\n\n"
+        "## Decision log (IDs)\n- A-001 2026-10-09 14:12: a decision, not a log line.\n"
+        "- 2026-10-09 14:57 VADER c3: k38r cleared.\n"
+    )
+    status = parse_status(text)
+    assert [e["text"] for e in status["entries"]] == [
+        "2026-10-09 14:40 VADER c3: first.",
+        "2026-10-09 14:57 VADER c3: k38r cleared.",
+    ]
+    assert status["changelog"][0] == "2026-10-09 14:57 VADER c3: k38r cleared."
+    assert status["decisions"] == ["One."]
+
+
 def test_a_stuck_job_clears_when_macs_change_log_says_it_was_fixed(tree):
     _stuck_job(tree, "claudemd", report_age_s=3600)
     _status_with(
@@ -289,6 +305,25 @@ def test_a_waiting_oneshot_never_alerts_but_stalls_after_6h(tree):
     alerts = {a["id"]: a for a in snap["attention"] if a["source"] == "job"}
     assert "new" not in alerts and alerts["old"]["state"] == "stalled"
     assert alerts["old"]["detail"] == "no result 6 h after MAC sent it"
+
+
+def test_a_stalled_oneshot_clears_when_macs_change_log_says_so(tree):
+    write(tree.runs_dir / "msgk38r.txt", "Review this change", age_s=4 * 86400)
+    write(tree.runs_dir / "msgs82g.txt", "Grade this script", age_s=5 * 86400)
+    _status_with(tree, f"{_local(5)} VADER c3: k38r cleared (no result; superseded). s82g cleared (WO #011 covers it).")
+    snap = build_snapshot(tree, FileCache())
+    jobs = {j["id"]: j for j in snap["oneshots"]}
+    for name in ("k38r", "s82g"):
+        assert (jobs[name]["state"], jobs[name]["action"], jobs[name]["alertable"]) == ("cleared", "done", False)
+        assert jobs[name]["followed_up_by"].startswith("STATUS.md: ")
+    assert not any(a.get("id") in ("k38r", "s82g") for a in snap["attention"])
+
+
+def test_a_change_log_entry_from_before_a_oneshot_was_sent_does_not_clear_it(tree):
+    write(tree.runs_dir / "msgk38r.txt", "Review this change", age_s=7 * 3600)
+    _status_with(tree, f"{_local(8 * 60)} VADER c3: k38r cleared.")
+    job = next(j for j in build_snapshot(tree, FileCache())["oneshots"] if j["id"] == "k38r")
+    assert job["state"] == "stalled"
 
 
 def test_only_blocked_work_orders_can_alert(tree):

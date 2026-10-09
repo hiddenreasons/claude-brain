@@ -63,12 +63,30 @@ def entry_time(text: str) -> Optional[str]:
     return local.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def _change_log(sections: Dict[str, List[str]]) -> List[str]:
+    """The change log's bullets, plus dated bullets MAC appends below later headings.
+
+    MAC keeps adding "- 2026-10-09 14:57 VADER c3: ..." lines at the end of the file, which can fall
+    under a newer section such as "Decision log (IDs)". Those count; that section's own "- A-001 ..."
+    lines don't start with a date, so they stay out.
+    """
+    log: List[str] = []
+    seen = False
+    for title, lines in sections.items():
+        if "change log" in title and not seen:
+            seen = True
+            log.extend(_top_bullets(lines))
+        elif seen:
+            log.extend(b for b in _top_bullets(lines) if ENTRY_TIME_RE.match(b))
+    return log
+
+
 def parse_status(text: Optional[str]) -> Dict[str, Any]:
     if not text:
         return {"decisions": [], "changelog": [], "entries": [], "running_note": None}
     sections = _sections(text)
     running_lines = [ln for ln in _find(sections, "running") if ln.strip()]
-    log = _top_bullets(_find(sections, "change log"))
+    log = _change_log(sections)
     return {
         "decisions": [clip(b, 600) for b in _top_bullets(_find(sections, "decision"))],
         "changelog": [clip(b, 600) for b in log][-15:][::-1],

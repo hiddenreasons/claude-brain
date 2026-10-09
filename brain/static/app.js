@@ -177,27 +177,28 @@ function jobMeta(job) {
 }
 
 function jobLine(job) {
-  if (job.kind === "folder") {
-    const lines = [];
-    const resolved = job.state === "followed_up" || job.state === "cleared";
-    if (resolved) {
-      const where = String(job.followed_up_by || "").startsWith("STATUS.md") ? "MAC's change log"
-        : String(job.followed_up_by || "").startsWith("MAC (comms") ? "MAC's message log" : job.followed_up_by;
-      lines.push(el("p", { class: `resolution ${job.state}`, title: job.followed_up_by || "" },
-        job.state === "cleared" ? "✔ Cleared by MAC" : "↻ MAC is handling it",
-        ` · ${where}`, job.followed_up_at ? ` · ${relTime(job.followed_up_at)}` : ""));
-    }
-    if (job.report_headline) {
-      const from = job.headline_source === "final reply" ? "Final reply: " : "";
-      // Once resolved, the old report is history: one dim line.
-      lines.push(el("p", { class: resolved ? "line was" : "line", title: resolved ? job.report_headline : null },
-        resolved ? "was: " : from, md(job.report_headline)));
-    }
-    return lines;
+  const lines = [];
+  const resolved = job.state === "followed_up" || job.state === "cleared";
+  if (resolved) {
+    const where = String(job.followed_up_by || "").startsWith("STATUS.md") ? "MAC's change log"
+      : String(job.followed_up_by || "").startsWith("MAC (comms") ? "MAC's message log" : job.followed_up_by;
+    lines.push(el("p", { class: `resolution ${job.state}`, title: job.followed_up_by || "" },
+      job.state === "cleared" ? "✔ Cleared by MAC" : "↻ MAC is handling it",
+      ` · ${where}`, job.followed_up_at ? ` · ${relTime(job.followed_up_at)}` : ""));
   }
-  if (job.note) return el("p", { class: "line" }, job.note);
-  if (job.result_preview) return el("p", { class: "line muted" }, job.result_preview.slice(0, 260));
-  return null;
+  // Once resolved, the old problem is history: one dim "was:" line.
+  const was = (text, cls, prefix = "") => el("p", { class: resolved ? "line was" : cls, title: resolved ? text : null },
+    resolved ? "was: " : prefix, md(text));
+  if (job.kind === "folder") {
+    if (job.report_headline) {
+      lines.push(was(job.report_headline, "line", job.headline_source === "final reply" ? "Final reply: " : ""));
+    }
+  } else if (job.note) {
+    lines.push(was(job.note, "line"));
+  } else if (job.result_preview) {
+    lines.push(el("p", { class: "line muted" }, job.result_preview.slice(0, 260)));
+  }
+  return lines;
 }
 
 // ---------- copy-a-fix-request buttons (ask.js) ----------
