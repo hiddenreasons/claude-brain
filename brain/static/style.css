@@ -652,6 +652,9 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .wb-none { color: var(--dim); }
 .wb-offline { color: var(--bad-text); font-weight: 700; letter-spacing: 0.1em; }
 .wb-why { color: var(--dim); font-weight: 400; letter-spacing: 0; }
+.wb-acc { margin-top: 5px; padding-top: 5px; border-top: 1px dashed rgba(167, 139, 250, 0.35); font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; white-space: normal; }
+.wb-acc.yes { color: var(--done); } .wb-acc.no { color: var(--bad-text); } .wb-acc.unknown { color: var(--dim); font-weight: 400; }
+.wb-rules { margin: 4px 0 0; padding-left: 14px; font-size: 9.5px; line-height: 1.45; color: var(--muted); white-space: normal; }
 @media (max-width: 640px) { .win-box { position: static; transform: none; margin: 10px auto; } }
 
 /* ---------- readable reports in the job window ---------- */

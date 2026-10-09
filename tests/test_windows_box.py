@@ -124,3 +124,25 @@ def test_a_windows_job_windows_lists_as_finished_is_done_not_running(tree):
     assert jobs["winslowtests"]["state"] == "running" and jobs["winslowtests"]["source"] == "Windows heartbeat"
     only_beat = {j["id"]: j for j in remote_jobs([started], [], beat, time.time())}
     assert only_beat["winslowtests"]["state"] == "running"  # running per the heartbeat, never in MAC's log
+
+
+def test_accepting_jobs_and_the_rules_are_shown(tree):
+    status_file(
+        tree,
+        copied_at=iso(time.time() - 60),
+        accepting={"ok": False, "reason": "RAM under 2 GB"},
+        rules=["one Claude job at a time", "Codex pictures only", 7],
+    )
+    box = read_windows_status(tree.runs_dir, time.time())
+    assert box["accepting"] == {"known": True, "yes": False, "reason": "RAM under 2 GB"}
+    assert box["rules"] == ["one Claude job at a time", "Codex pictures only"]
+    status_file(tree, copied_at=iso(time.time() - 60), accepting="no: disk full")
+    assert read_windows_status(tree.runs_dir, time.time())["accepting"] == {
+        "known": True,
+        "yes": False,
+        "reason": "disk full",
+    }
+    status_file(tree, copied_at=iso(time.time() - 60), accepting=True)
+    assert read_windows_status(tree.runs_dir, time.time())["accepting"]["yes"] is True
+    status_file(tree, copied_at=iso(time.time() - 60))
+    assert read_windows_status(tree.runs_dir, time.time())["accepting"]["known"] is False

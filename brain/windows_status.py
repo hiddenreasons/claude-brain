@@ -51,6 +51,23 @@ def _job(item: Any, default_state: Optional[str] = None) -> Optional[Dict[str, s
     return None
 
 
+def _accepting(value: Any) -> Dict[str, Any]:
+    """ "accepting" as true/false, "yes"/"no: reason", or {"ok"|"value"|"accepting": bool, "reason": text}."""
+    reason = None
+    if isinstance(value, dict):
+        reason = value.get("reason") or value.get("why")
+        value = next((value[k] for k in ("ok", "value", "accepting", "yes") if k in value), None)
+    if isinstance(value, str):
+        word, _, rest = value.strip().partition(":")
+        if not rest:
+            word, _, rest = value.strip().partition(" ")
+        value = {"yes": True, "true": True, "no": False, "false": False}.get(word.strip().lower())
+        reason = reason or (rest.strip(" -—") or None)
+    if not isinstance(value, bool):
+        return {"known": False, "yes": None, "reason": None}
+    return {"known": True, "yes": value, "reason": clip(reason, 160) if isinstance(reason, str) else None}
+
+
 def read_windows_status(
     runs_dir: Path, now: float, codex_running: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
@@ -61,6 +78,8 @@ def read_windows_status(
         "age_s": None,
         "offline": True,
         "jobs": [],
+        "accepting": {"known": False, "yes": None, "reason": None},
+        "rules": [],
         "reason": "no windows-status.json yet",
     }
     raw = read_text(path, 256 * 1024)
@@ -111,6 +130,10 @@ def read_windows_status(
     order = {"RUNNING": 0, "BUSY": 0, "STARTING": 1}
     shown.sort(key=lambda j: order.get(j["state"], 2))
     out["jobs"] = shown
+    out["accepting"] = _accepting(data.get("accepting"))
+    rules = data.get("rules")
+    rules = [rules] if isinstance(rules, str) else rules if isinstance(rules, list) else []
+    out["rules"] = [clip(r, 160) for r in rules if isinstance(r, str) and r.strip()][:8]
     if stamp is None:
         out["reason"] = "no update time in windows-status.json"
         return out

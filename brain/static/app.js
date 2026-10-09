@@ -1085,8 +1085,12 @@ function renderWinBox() {
       : w.jobs.map((j) => el("div", { class: "wb-line" },
         el("span", { class: "wb-name" }, dots(j.name)), " ",
         el("span", { class: `wb-st wb-${j.state.toLowerCase().replace(/\s+/g, "-")}` }, j.state)));
+  const acc = w.accepting || {};
+  const accepting = el("div", { class: `wb-acc ${acc.known ? (acc.yes ? "yes" : "no") : "unknown"}` },
+    "ACCEPTING JOBS: ", acc.known ? (acc.yes ? "yes" : `no${acc.reason ? ` — ${acc.reason}` : ""}`) : "unknown (not in windows-status.json yet)");
+  const rules = (w.rules || []).length ? el("ul", { class: "wb-rules" }, w.rules.map((r) => el("li", {}, r))) : null;
   box.className = `win-box${w.offline ? " is-offline" : ""}`;
-  box.replaceChildren(el("div", { class: "wb-head" }, el("b", {}, "WINDOWS"), ` · last update ${when}`), ...lines);
+  box.replaceChildren(el("div", { class: "wb-head" }, el("b", {}, "WINDOWS"), ` · last update ${when}`), ...lines, accepting, rules || "");
   placeWinBox();
 }
 
