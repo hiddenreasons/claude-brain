@@ -7,12 +7,12 @@
 const HUD_COLORS = {
   running: "#fff1a8", waiting: "#fff1a8", done: "#ffb15c", followed_up: "#50c8ff", cleared: "#5bd38a",
   blocked: "#ff4d5e", error: "#ff4d5e", gate_failed: "#ff4d5e", stalled: "#ff4d5e", no_report: "#ff4d5e",
-  prepared: "#6b7280", no_result: "#6b7280",
+  prepared: "#6b7280",
   OPEN: "#50c8ff", RUNNING: "#fff1a8", BLOCKED: "#ff4d5e", PARKED: "#6b7280", DONE: "#46a758", NOTE: "#6b7280",
 };
 const HUD_GLYPHS = {
   running: "RUN", waiting: "WAIT", done: "DONE", followed_up: "F-UP", cleared: "CLRD", blocked: "BLKD", error: "ERR",
-  gate_failed: "GATE", stalled: "STALL", no_report: "NORPT", prepared: "PREP", no_result: "NORES",
+  gate_failed: "GATE", stalled: "STALL", no_report: "NORPT", prepared: "PREP",
   OPEN: "OPEN", RUNNING: "RUN", BLOCKED: "BLKD", PARKED: "PARK", DONE: "DONE", NOTE: "NOTE",
 };
 const DAY_MS = 24 * 3600 * 1000;

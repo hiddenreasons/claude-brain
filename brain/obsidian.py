@@ -38,7 +38,6 @@ STATE_WORDS = {
     "followed_up": "MAC followed up",
     "cleared": "Cleared by MAC",
     "prepared": "No Claude run",
-    "no_result": "No result",
 }
 
 
@@ -396,7 +395,7 @@ def render_job(j: Dict[str, Any], detail: Dict[str, Any], orders: List[Tuple[str
     else:
         if detail.get("result"):
             parts.append("## Result\n\n" + safe_text(clip(detail["result"], 20000)))
-        elif j["state"] in ("waiting", "no_result"):
+        elif j["state"] in ("waiting", "stalled"):
             parts.append("## Result\n\nNo result yet.")
         if detail.get("prompt"):
             parts.append(

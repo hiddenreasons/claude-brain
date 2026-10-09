@@ -6,7 +6,7 @@
 const STATE_LABELS = {
   running: "Running", waiting: "Waiting", done: "Done", blocked: "Blocked", error: "Error",
   gate_failed: "Gate failed", stalled: "Stalled", no_report: "No report", followed_up: "MAC followed up", cleared: "Cleared",
-  prepared: "No Claude run", no_result: "No result",
+  prepared: "No Claude run",
   OPEN: "Open", BLOCKED: "Blocked", PARKED: "Parked", DONE: "Done", RUNNING: "Running", NOTE: "Note",
 };
 const PROBLEM_STATES = new Set(["blocked", "error", "gate_failed", "stalled", "no_report"]);
@@ -150,8 +150,8 @@ function jobLine(job) {
 
 // ---------- copy-a-fix-request buttons (ask.js) ----------
 
-// Only open problems get a fix-request button. Followed-up and cleared jobs are resolved: never an issue.
-const ISSUE_STATES = new Set(["blocked", "error", "gate_failed", "stalled", "no_report", "no_result"]);
+// Only real problems get a fix-request button: the server marks them "alertable" (blocked, stalled,
+// gate_failed, no_report, error; BLOCKED work orders). Running, waiting, OPEN and resolved never do.
 const findJob = (kind, id) => (kind === "folder" ? snap.folders : snap.oneshots).find((j) => j.id === id);
 const findOrder = (id) => snap.inbox.find((e) => e.id === id);
 
@@ -173,7 +173,7 @@ function jobCard(job) {
     jobMeta(job),
     jobLine(job),
   );
-  const askBtn = ISSUE_STATES.has(job.state)
+  const askBtn = job.alertable
     ? ask(() => window.askDrafts.draftForJob(findJob(job.kind, job.id) || job))
     : null;
   return el("li", {}, withAsk(card, askBtn));
@@ -323,9 +323,7 @@ function orderCard(entry) {
   if (entry.body) {
     details.append(el("div", { class: "body" }, md(entry.body), entry.body_truncated ? "\n\n(cut short; see CLAUDE INBOX.md)" : ""));
   }
-  const askBtn = ["DONE", "NOTE"].includes(entry.state)
-    ? null
-    : ask(() => window.askDrafts.draftForOrder(findOrder(entry.id) || entry));
+  const askBtn = entry.alertable ? ask(() => window.askDrafts.draftForOrder(findOrder(entry.id) || entry)) : null;
   return el("li", {}, withAsk(details, askBtn));
 }
 
@@ -357,8 +355,8 @@ function renderLogs() {
   const incidents = snap.issues.filter((i) => matches(i.what, i.job));
   document.getElementById("incidents").replaceChildren(
     ...(incidents.length
-      ? incidents.map((i) => el("li", {}, `${i.date}${i.job ? ` · ${i.job}` : ""}: `, md(i.what), " ",
-        ask(() => window.askDrafts.draftForIncident(i), "Ask MAC")))
+      // Incidents are MAC's own history log: no fix-request buttons (only blocked/stalled/failed jobs get them).
+      ? incidents.map((i) => el("li", {}, `${i.date}${i.job ? ` · ${i.job}` : ""}: `, md(i.what)))
       : [el("li", { class: "empty" }, "No incidents logged.")])
   );
   document.getElementById("sources").replaceChildren(

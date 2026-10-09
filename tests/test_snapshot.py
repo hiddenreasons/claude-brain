@@ -258,3 +258,54 @@ def test_a_bare_mention_does_not_reopen_and_every_mention_counts(tree):
         f"{_local(2)} VADER c3: looked at claudemd notes again.",
     )
     assert _job_state(tree)[0]["state"] == "cleared"
+
+
+# ---------- only real problems alert (Anthony, 2026-10-09) ----------
+
+
+def _live_job(tree, name):
+    job = tree.runs_dir / name
+    write(job / "brief.md", f"JOB: {name} task")
+    write(job / "runs.log", "start 2026-10-09 09:01:03 EDT iter 1 pid 1 prompt p model opus effort high\n")
+    write(job / "iter-1.jsonl", '{"type":"assistant","message":{"content":[]}}\n')  # fresh log, not done
+
+
+def test_a_running_job_with_a_fresh_log_never_alerts_or_gets_a_button(tree):
+    _live_job(tree, "issuestab")
+    snap = build_snapshot(tree, FileCache())
+    job = next(j for j in snap["folders"] if j["id"] == "issuestab")
+    assert job["state"] == "running"
+    assert job["alertable"] is False
+    assert not any(a.get("id") == "issuestab" for a in snap["attention"])
+
+
+def test_a_waiting_oneshot_never_alerts_but_stalls_after_6h(tree):
+    write(tree.runs_dir / "msgnew.txt", "Fresh order")
+    write(tree.runs_dir / "msgold.txt", "Old order", age_s=7 * 3600)
+    snap = build_snapshot(tree, FileCache())
+    jobs = {j["id"]: j for j in snap["oneshots"]}
+    assert (jobs["new"]["state"], jobs["new"]["alertable"]) == ("waiting", False)
+    assert (jobs["old"]["state"], jobs["old"]["alertable"]) == ("stalled", True)
+    alerts = {a["id"]: a for a in snap["attention"] if a["source"] == "job"}
+    assert "new" not in alerts and alerts["old"]["state"] == "stalled"
+    assert alerts["old"]["detail"] == "no result 6 h after MAC sent it"
+
+
+def test_only_blocked_work_orders_can_alert(tree):
+    snap = build_snapshot(tree, FileCache())
+    by_state = {}
+    for e in snap["inbox"]:
+        by_state.setdefault(e["state"], set()).add(e["alertable"])
+    assert by_state["BLOCKED"] == {True}
+    for state in ("OPEN", "DONE", "PARKED", "NOTE"):
+        assert by_state.get(state, {False}) == {False}, state
+    running_order = "## RUNNING — 2026-10-09 · Being built\\n\\nWork in progress.\\n"
+    write(tree.inbox_path, tree.inbox_path.read_text() + running_order.replace("\\n", "\n"))
+    entry = next(e for e in build_snapshot(tree, FileCache())["inbox"] if e["title"] == "Being built")
+    assert (entry["state"], entry["alertable"]) == ("RUNNING", False)
+
+
+def test_every_alertable_state_and_nothing_else(tree):
+    from brain.snapshot import ALERT_STATES
+
+    assert ALERT_STATES == {"blocked", "stalled", "gate_failed", "no_report", "error"}

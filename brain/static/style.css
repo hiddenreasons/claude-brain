@@ -279,7 +279,7 @@ button.card:hover { border-color: var(--line-2); }
 .s-done, .s-DONE, .s-cleared { color: var(--done); }
 .s-blocked, .s-error, .s-gate_failed, .s-stalled, .s-no_report, .s-BLOCKED { color: var(--accent); }
 .s-followed_up, .s-OPEN { color: var(--mac); }
-.s-prepared, .s-no_result, .s-PARKED, .s-NOTE { color: var(--neutral); }
+.s-prepared, .s-PARKED, .s-NOTE { color: var(--neutral); }
 
 .activity { list-style: none; margin: 8px 0 0; padding: 6px 8px; font-size: 12px; background: #030407; border: 1px solid var(--line); }
 .activity li { padding: 2px 0; overflow-wrap: anywhere; }

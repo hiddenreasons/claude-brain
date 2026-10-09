@@ -66,7 +66,11 @@ function draftForJob(job) {
   if (job.report_headline) lines.push(`Claude's last word: "${quote(job.report_headline)}"`);
   if (job.note) lines.push(`Note: ${job.note}`);
   if (job.error_preview) lines.push(`Errors: "${quote(job.error_preview, 300)}"`);
-  if (job.state === "stalled") lines.push(`Its live log stopped updating ${relTime(job.stream_updated_at) || "a while ago"} and the run never finished.`);
+  if (job.state === "stalled") {
+    lines.push(job.kind === "oneshot"
+      ? `No result ${relTime(job.sent_at).replace(" ago", "")} after you sent it (sent ${relTime(job.sent_at)}).`
+      : `Its live log stopped updating ${relTime(job.stream_updated_at) || "a while ago"} and the run never finished.`);
+  }
   if (job.state === "followed_up" || job.state === "cleared") lines.push(`You already acted after the report (${job.followed_up_by}, ${relTime(job.followed_up_at)}).`);
   const last = (job.activity || []).slice(-3).map((a) => (a.kind === "tool" ? `${a.name}: ${clean(a.summary)}` : `Claude: ${quote(a.text, 140)}`));
   if (last.length) lines.push(`Last actions: ${last.join(" | ")}`);

@@ -19,7 +19,10 @@ from .status_files import parse_issues, parse_status
 
 ONESHOT_LIMIT = 150  # newest one-shot jobs sent to the page; the total count is reported too
 ATTENTION_WINDOW_S = 72 * 3600  # older problems are history, not alerts
-FOLDER_PROBLEMS = {"gate_failed", "blocked", "stalled", "no_report"}
+# The only states that may alert or get a fix-request button (Anthony, 2026-10-09). Running and
+# waiting jobs, OPEN and RUNNING work orders, and resolved jobs never do.
+ALERT_STATES = {"blocked", "stalled", "gate_failed", "no_report", "error"}
+ALERT_ORDER_STATES = {"BLOCKED"}
 
 
 def fingerprint(cfg: Config) -> str:
@@ -73,7 +76,7 @@ def build_attention(inbox: List[dict], folders: List[dict], oneshots: List[dict]
                 {"source": "work_order", "id": entry["id"], "state": "BLOCKED", "title": entry["title"], "detail": last}
             )
     for job in folders:
-        if job["state"] in FOLDER_PROBLEMS and _age_s(job["updated_at"], now) < ATTENTION_WINDOW_S:
+        if job["state"] in ALERT_STATES and _age_s(job["updated_at"], now) < ATTENTION_WINDOW_S:
             items.append(
                 {
                     "source": "job",
@@ -85,13 +88,13 @@ def build_attention(inbox: List[dict], folders: List[dict], oneshots: List[dict]
                 }
             )
     for job in oneshots:
-        if job["state"] == "error" and _age_s(job["updated_at"], now) < ATTENTION_WINDOW_S:
+        if job["state"] in ALERT_STATES and _age_s(job["updated_at"], now) < ATTENTION_WINDOW_S:
             items.append(
                 {
                     "source": "job",
                     "kind": "oneshot",
                     "id": job["id"],
-                    "state": "error",
+                    "state": job["state"],
                     "title": job["title"],
                     "detail": job["note"] or job["result_preview"],
                 }
@@ -179,6 +182,11 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         comms_path(cfg.runs_dir), "comms", lambda p: parse_comms(read_tail(p, COMMS_TAIL) or "")
     )
     apply_followups(folders, status.get("entries", []), comms)
+    # One flag the page trusts for fix-request buttons, so the rule lives in one place.
+    for job in folders + oneshots:
+        job["alertable"] = job["state"] in ALERT_STATES
+    for entry in inbox:
+        entry["alertable"] = entry["state"] in ALERT_ORDER_STATES
     return {
         "generated_at": iso(now),
         "sources": {

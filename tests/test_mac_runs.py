@@ -49,12 +49,12 @@ def test_oneshot_unreadable_result_is_an_error_with_a_note(tree):
     assert job["state"] == "error" and job["note"] == "result file is unreadable"
 
 
-def test_oneshot_without_result_is_waiting_when_recent_and_no_result_when_old(tree):
+def test_oneshot_without_result_is_waiting_when_recent_and_stalled_after_6h(tree):
     write(tree.runs_dir / "msgnew.txt", "Fresh order")
     write(tree.runs_dir / "msgold.txt", "Old order", age_s=10 * HOUR)
     jobs = {j["id"]: j for j in scan_flat_jobs(tree.runs_dir, FileCache())}
     assert jobs["new"]["state"] == "waiting"
-    assert jobs["old"]["state"] == "no_result"
+    assert jobs["old"]["state"] == "stalled"
 
 
 def test_oneshot_error_text_is_surfaced(tree):

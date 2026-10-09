@@ -95,7 +95,8 @@ def scan_flat_jobs(runs_dir: Path, cache: FileCache, now: Optional[float] = None
         err_text = cache.get(err_path, "head", lambda p: read_text(p, 2048))
 
         if result is None:
-            state = "waiting" if now - sent_ts < WAITING_WINDOW_S else "no_result"
+            # No result yet: still running for up to 6 h, after that it's stalled (an alert).
+            state = "waiting" if now - sent_ts < WAITING_WINDOW_S else "stalled"
         elif result["unreadable"]:
             state = "error"
         else:
@@ -112,7 +113,11 @@ def scan_flat_jobs(runs_dir: Path, cache: FileCache, now: Optional[float] = None
                 "finished_at": mtime_iso(out_path) if result else None,
                 "updated_at": mtime_iso(out_path) if result else iso(sent_ts),
                 "state": state,
-                "note": "result file is unreadable" if result.get("unreadable") else None,
+                "note": "result file is unreadable"
+                if result.get("unreadable")
+                else "no result 6 h after MAC sent it"
+                if state == "stalled"
+                else None,
                 "result_preview": clip(result.get("result"), 600),
                 "session_id": result.get("session_id"),
                 "cost_usd": result.get("cost_usd"),
