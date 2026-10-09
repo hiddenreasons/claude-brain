@@ -33,9 +33,17 @@ STATIC_FILES = {
     "/brains.js": ("brains.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
+# Brain artwork (Codex stills, Runway loops). Optional: the page draws its own brains when these are missing.
+MEDIA_DIR = STATIC_DIR / "media"
+MEDIA_FILES = {
+    "/media/claude-brain.png": ("claude-brain.png", "image/png"),
+    "/media/mac-brain.png": ("mac-brain.png", "image/png"),
+    "/media/claude-loop.mp4": ("claude-loop.mp4", "video/mp4"),
+    "/media/mac-loop.mp4": ("mac-loop.mp4", "video/mp4"),
+}
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; "
         "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
@@ -137,8 +145,7 @@ def make_handler(state: BrainState):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            for key, value in {**SECURITY_HEADERS, **(extra or {})}.items():
+            for key, value in {"Cache-Control": "no-store", **SECURITY_HEADERS, **(extra or {})}.items():
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
@@ -158,6 +165,13 @@ def make_handler(state: BrainState):
             if url.path in STATIC_FILES:
                 name, content_type = STATIC_FILES[url.path]
                 self._send(HTTPStatus.OK, (STATIC_DIR / name).read_bytes(), content_type)
+            elif url.path in MEDIA_FILES:
+                name, content_type = MEDIA_FILES[url.path]
+                path = MEDIA_DIR / name
+                if path.is_file() and not path.is_symlink():
+                    self._send(HTTPStatus.OK, path.read_bytes(), content_type, {"Cache-Control": "max-age=300"})
+                else:
+                    self._error(HTTPStatus.NOT_FOUND, "not made yet")
             elif url.path == "/api/snapshot":
                 with state.cond:
                     body = state.snapshot_bytes

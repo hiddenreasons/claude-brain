@@ -313,6 +313,43 @@
     ctx.fill();
   }
 
+  // ---------- artwork from files (Codex stills, Runway loops) ----------
+
+  // Looks for /media/<who>-loop.mp4 first, then /media/<who>-brain.png. Calls back when one is ready.
+  // Both have black backgrounds; drawn with additive blending, black adds nothing, so only the brain shows.
+  function loadArt(who, onReady) {
+    let haveVideo = false;
+    const img = new Image();
+    img.onload = () => {
+      if (!haveVideo) onReady({ el: img, kind: "image" });
+    };
+    img.src = `/media/${who}-brain.png`;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.addEventListener("canplay", () => {
+      haveVideo = true;
+      video.play().catch(() => {});
+      onReady({ el: video, kind: "video" });
+    }, { once: true });
+    video.src = `/media/${who}-loop.mp4`;
+  }
+
+  function drawArt(ctx, art, x, y, r, t, flash) {
+    // The brain fills about 70% of the artwork, so 3r makes it about as wide as the drawn brains.
+    const breathe = art.kind === "image" && !reduceMotion ? 1 + 0.012 * Math.sin(t * 1.3) : 1;
+    const size = r * 3 * breathe;
+    ctx.globalAlpha = art.kind === "image" && !reduceMotion ? 0.92 + 0.08 * Math.sin(t * 1.7) : 1;
+    ctx.drawImage(art.el, x - size / 2, y - size / 2, size, size);
+    if (flash > 0.01) {
+      ctx.globalAlpha = Math.min(1, flash * 0.7); // drawing it again adds light: the brain flares
+      ctx.drawImage(art.el, x - size / 2, y - size / 2, size, size);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // ---------- lightning ----------
 
   function boltPath(ax, ay, bx, by, rand, rough) {
@@ -380,6 +417,9 @@
       this.arc = null;
       this.arcAt = 0;
       this.start = performance.now();
+      this.art = { claude: null, mac: null };
+      loadArt("claude", (art) => (this.art.claude = art));
+      loadArt("mac", (art) => (this.art.mac = art));
       new ResizeObserver(() => this.layout()).observe(canvas);
       canvas.addEventListener("pointermove", (e) => this.pointer(e));
       canvas.addEventListener("pointerdown", (e) => this.pointer(e));
@@ -576,8 +616,10 @@
       this.bolts = this.bolts.filter((b) => now - b.born < TRACE_S || b === this.hoverBolt);
       for (const key of ["claude", "mac"]) this.flash[key] = Math.max(0, this.flash[key] - 0.03);
 
-      drawClaude(ctx, this.claudeArt, ...this.claudeAt, this.r, t, this.flash.claude);
-      drawMac(ctx, this.macArt, ...this.macAt, this.r, t, this.flash.mac);
+      if (this.art.claude) drawArt(ctx, this.art.claude, ...this.claudeAt, this.r, t, this.flash.claude);
+      else drawClaude(ctx, this.claudeArt, ...this.claudeAt, this.r, t, this.flash.claude);
+      if (this.art.mac) drawArt(ctx, this.art.mac, ...this.macAt, this.r, t, this.flash.mac);
+      else drawMac(ctx, this.macArt, ...this.macAt, this.r, t, this.flash.mac);
       this.drawFlare(ctx, "claude", this.claudeAt);
       this.drawFlare(ctx, "mac", this.macAt);
       if (this.running > 0) this.drawRunningArc(ctx, now);
