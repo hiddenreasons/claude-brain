@@ -634,6 +634,20 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .flag-red { color: #fff; background: var(--accent); border-radius: 3px; padding: 2px 6px; font-weight: 700; letter-spacing: 0.08em; }
 @media (max-width: 760px) { .overdue { margin-left: 16px; margin-right: 16px; } .op { grid-template-columns: 1fr; gap: 2px; } }
 
+/* ---------- flow & advisor ---------- */
+.flow-table { width: 100%; border-collapse: collapse; font: 11.5px/1.4 var(--mono); margin-bottom: 10px; }
+.flow-table th, .flow-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid rgba(var(--wire-rgb), 0.08); }
+.flow-table thead th { font-size: 9.5px; letter-spacing: 0.12em; color: rgba(var(--wire-rgb), 0.85); }
+.flow-table tbody th { font-weight: 400; color: var(--dim); text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.08em; }
+.recs { list-style: none; margin: 0; padding: 0; }
+.rec { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 4px 8px; padding: 7px 0; border-bottom: 1px solid rgba(var(--wire-rgb), 0.08); font-size: 12.5px; }
+.rec-id { font: 600 10.5px var(--mono); color: var(--wire); }
+.rec-st { font: 700 9.5px var(--mono); letter-spacing: 0.1em; }
+.st-open { color: var(--help); } .st-applied { color: var(--done); } .st-declined { color: var(--dim); } .st-deferred { color: var(--muted); }
+.rec-what { color: #e6edf2; }
+.rec-opt, .rec-res { grid-column: 3; color: var(--muted); font-size: 12px; }
+.rec-declined { opacity: 0.6; }
+
 /* ---------- the WINDOWS box between the Death Stars ---------- */
 .win-box {
   position: absolute; left: 50%; top: 55%; transform: translateX(-50%); z-index: 2; min-width: 230px; max-width: 300px;

@@ -1131,6 +1131,32 @@ function renderOps() {
   document.getElementById("ops").replaceChildren(...rows);
 }
 
+// Flow on both machines, and the advisor's recommendations for MAC (it recommends, never acts).
+function renderFlow() {
+  const f = snap.flow || { machines: {}, findings: [] };
+  const m = (x) => (x === null || x === undefined ? "—" : x);
+  const mac = f.machines.MAC || {}, win = f.machines.WINDOWS || {};
+  const row = (label, ...vals) => el("tr", {}, el("th", { scope: "row" }, label), ...vals.map((v) => el("td", {}, String(v))));
+  const table = el("table", { class: "flow-table" },
+    el("thead", {}, el("tr", {}, el("th", {}, ""), el("th", { scope: "col" }, "MAC"), el("th", { scope: "col" }, "WINDOWS"))),
+    el("tbody", {},
+      row("running", m(mac.running), win.known ? m(win.running) : "?"),
+      row("queue", m(mac.queue), win.known ? m(win.queue) : "?"),
+      row("idle", mac.idle_min ? `${mac.idle_min} min` : mac.idle_min === 0 ? "busy" : "—", win.idle_min ? `${win.idle_min} min` : win.idle_min === 0 ? "busy" : "—"),
+      row("avg job (24 h)", mac.avg_job_min ? `${mac.avg_job_min} min (${mac.jobs_24h})` : "—", "—"),
+      row("wait on Anthony", `${m(mac.wait_on_anthony_min)} min`, "—"),
+      row("cost per job", mac.cost_per_job ? `$${mac.cost_per_job}` : "—", "—"),
+      row("free memory", mac.free_memory_pct !== null && mac.free_memory_pct !== undefined ? `${mac.free_memory_pct}%` : "—", "—"),
+    ));
+  const recs = (snap.recommendations || []);
+  const recList = recs.length ? el("ol", { class: "recs" }, recs.slice(0, 8).map((r) => el("li", { class: `rec rec-${r.status}` },
+    el("span", { class: "rec-id" }, r.id), el("span", { class: `rec-st st-${r.status}` }, r.status.toUpperCase()),
+    el("span", { class: "rec-what" }, r.what), el("span", { class: "rec-opt" }, `→ ${r.option}`),
+    r.result ? el("span", { class: "rec-res" }, `Did it help? ${r.result.verdict}`) : null,
+  ))) : empty("No recommendations: nothing wasteful spotted.");
+  document.getElementById("flow").replaceChildren(table, el("p", { class: "for-mac-h" }, "Recommendations for MAC · ~/.vader-mac-runs/brain/RECOMMENDATIONS.md"), recList);
+}
+
 function renderAll() {
   if (!snap) return;
   if (window.renderHud) window.renderHud(snap);
@@ -1140,6 +1166,7 @@ function renderAll() {
   renderSelfcheck();
   renderOverdue();
   renderOps();
+  renderFlow();
   renderAudit();
   renderWinBox();
   renderAttention();

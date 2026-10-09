@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import foundation, gitread, ops, selfcheck
+from . import flow, foundation, gitread, ops, selfcheck
 from .codex import read_codex
 from .comms import TAIL_BYTES as COMMS_TAIL
 from .comms import comms_path, parse_comms
@@ -318,5 +318,8 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         }
         for lp in snapshot["ops"]["loops"]
     ]
+    # Flow on both machines and the waste in it (advisor.py turns findings into recommendations for MAC).
+    machines_flow = flow.metrics(snapshot, now, flow.mac_free_memory_pct())
+    snapshot["flow"] = {"machines": machines_flow, "findings": flow.findings(snapshot, machines_flow, now)}
     snapshot["selfcheck"] = selfcheck.run(snapshot, cfg.status_path, cfg.runs_dir, now)
     return snapshot

@@ -98,6 +98,13 @@ class BrainState:
         # One alert per job state, clears, decisions and bugs go to the Brain's own audit trail.
         safe_record(self.recorder, snapshot)
         snapshot["audit"] = audit_tail(self.files)
+        snapshot["recommendations"] = [
+            {
+                k: r.get(k)
+                for k in ("id", "kind", "machine", "what", "option", "impact", "status", "note", "result", "at")
+            }
+            for r in (self.recorder.recommendations if self.recorder else [])
+        ]
         payload = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
         with self.cond:
             self._fingerprint = fp

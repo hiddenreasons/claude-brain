@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-LOGS = {"audit.jsonl", "alerts.jsonl", "learning.jsonl", "recommendations.jsonl", "lessons.jsonl"}
+LOGS = {"audit.jsonl", "alerts.jsonl", "learning.jsonl", "recommendations.jsonl", "lessons.jsonl", "flow.jsonl"}
 PAGES = {"RECOMMENDATIONS.md", "PROPOSED-LESSONS.md", "LEARNING-LOG.md"}
 DATED_RE = re.compile(r"^(?:digest-\d{4}-\d{2}-\d{2}|weekly-\d{4}-W\d{2})\.md$")
 # MAC's files in the same folder: the Brain reads them, never writes them

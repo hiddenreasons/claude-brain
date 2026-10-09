@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
+from .advisor import Advisor, sample_flow
 from .brainfiles import BrainFiles, Ledger, audit
 
 log = logging.getLogger("claude-brain")
@@ -32,6 +33,8 @@ def alert_key(item: Dict[str, Any], jobs: Dict[str, Dict[str, Any]]) -> str:
 class Recorder:
     def __init__(self, files: BrainFiles) -> None:
         self.files = files
+        self.advisor = Advisor(files)
+        self.recommendations: List[Dict[str, Any]] = []
         self.alerts = Ledger(files, "alerts.jsonl")
         self.seen = Ledger(files, "audit.jsonl", key="key")
 
@@ -96,7 +99,28 @@ class Recorder:
                 "Anthony / MAC (STATUS.md)",
             ):
                 counts["decisions"] += 1
-        day = datetime.now().astimezone().date().isoformat()
+        # Part 4: recommendations for MAC (recommend, never act), the hourly flow sample, MAC's status edits.
+        now = datetime.now().astimezone()
+        findings = (snapshot.get("flow") or {}).get("findings", [])
+        counts["recommendations"] = self.advisor.record(findings)
+        sample_flow(self.files, (snapshot.get("flow") or {}).get("machines", {}), findings, now)
+        recs = self.advisor.recommendations(now)
+        for r in recs:
+            if r["status"] != "open":
+                self._once(
+                    f"rec-status:{r['id']}|{r['status']}",
+                    "recommendation",
+                    r["id"],
+                    f"status {r['status']} {r.get('note') or ''}".strip(),
+                    "MAC",
+                )
+        self.advisor.write_page(recs)
+        self.recommendations = recs
+        year, week, _ = now.isocalendar()
+        self.files.write(
+            f"weekly-{year}-W{week:02d}.md", weekly_text(recs, snapshot.get("learning") or {}, f"{year}-W{week:02d}")
+        )
+        day = now.date().isoformat()
         if self.files.write(f"digest-{day}.md", digest_text(snapshot, day)):
             counts["digest"] = 1
         return counts
@@ -153,6 +177,38 @@ def digest_text(snapshot: Dict[str, Any], day: str) -> str:
         "",
     ]
     lines += [f"## Lessons proposed ({len(lessons)})", ""] + [f"- {lesson['title']}" for lesson in lessons] + [""]
+    return "\n".join(lines)
+
+
+def weekly_text(recs: List[Dict[str, Any]], learning: Dict[str, Any], week: str) -> str:
+    """Weekly report: did the recommendations MAC applied help, and how the Brain's own alerts are doing."""
+    applied = [r for r in recs if r["status"] == "applied"]
+    lines = [
+        f"# Claude Brain weekly report, {week}",
+        "",
+        "Written by Claude Brain. It only reports; nothing was changed.",
+        "",
+    ]
+    lines += [f"## Applied recommendations ({len(applied)})", ""]
+    for r in applied:
+        res = r.get("result") or {}
+        lines.append(
+            f"- {r['id']} {r.get('what')}: **{res.get('verdict', 'not judged')}** "
+            f"(before {res.get('before')}, after {res.get('after')})"
+        )
+    if not applied:
+        lines.append("- none applied yet")
+    counts = {s: sum(1 for r in recs if r["status"] == s) for s in ("open", "deferred", "declined")}
+    lines += ["", f"Open {counts['open']} · deferred {counts['deferred']} · declined {counts['declined']}", ""]
+    stats = learning.get("weekly") or {}
+    lines += ["## The Brain's own alerts this week", ""]
+    lines += [
+        f"- alerts: {stats.get('alerts', 0)}",
+        f"- false alerts (cleared within 15 min): {stats.get('false_alerts', 0)}",
+        f"- duplicate alerts stopped: {stats.get('duplicates', 0)}",
+        f"- median time to clear: {stats.get('median_clear_min', '—')} min",
+        "",
+    ]
     return "\n".join(lines)
 
 
