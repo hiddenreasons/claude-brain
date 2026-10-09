@@ -108,6 +108,33 @@ def test_unknown_path_is_404(server):
     assert get(port, "/../../etc/passwd")[0].status == 404
 
 
+def get_range(port, path, rng):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    conn.request("GET", path, headers={"Host": f"127.0.0.1:{port}", "Range": rng})
+    res = conn.getresponse()
+    body = res.read()
+    conn.close()
+    return res, body
+
+
+def test_media_is_optional_and_supports_byte_ranges(server, tmp_path, monkeypatch):
+    import brain.server as srv
+
+    _, port = server
+    monkeypatch.setattr(srv, "MEDIA_DIR", tmp_path)
+    assert get(port, "/media/claude-loop.mp4")[0].status == 404  # not made yet
+    (tmp_path / "claude-loop.mp4").write_bytes(bytes(range(100)))
+    res, body = get(port, "/media/claude-loop.mp4")
+    assert res.status == 200 and len(body) == 100 and res.getheader("Accept-Ranges") == "bytes"
+    res, body = get_range(port, "/media/claude-loop.mp4", "bytes=10-19")
+    assert res.status == 206 and body == bytes(range(10, 20))
+    assert res.getheader("Content-Range") == "bytes 10-19/100"
+    res, body = get_range(port, "/media/claude-loop.mp4", "bytes=-5")
+    assert res.status == 206 and body == bytes(range(95, 100))
+    assert get_range(port, "/media/claude-loop.mp4", "bytes=500-")[0].status == 416
+    assert get(port, "/media/../server.py")[0].status == 404  # only the four named files
+
+
 def test_a_line_in_macs_message_log_reaches_the_page(server):
     cfg, port = server
     line = (

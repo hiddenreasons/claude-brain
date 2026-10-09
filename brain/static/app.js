@@ -518,6 +518,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("search").addEventListener("input", (ev) => { ui.query = ev.target.value.trim(); renderAll(); });
   document.getElementById("detail-close").addEventListener("click", () => document.getElementById("detail").close());
   if (window.BrainsVisual) {
+    const motion = window.BrainsVisual.motion;
+    const toggle = document.getElementById("motion-toggle");
+    toggle.textContent = motion.calm ? "Motion: Calm" : "Motion: Full";
+    toggle.setAttribute("aria-pressed", String(!motion.calm));
+    toggle.title = motion.systemCalm
+      ? "Your system has Reduce Motion on. Choose Full to see the live animation here anyway."
+      : "Switch between full animation and calm, still brains.";
+    toggle.addEventListener("click", () => window.BrainsVisual.setMotion(motion.calm ? "full" : "calm"));
     brains = new window.BrainsVisual(
       document.getElementById("brains-canvas"),
       document.getElementById("bolt-tip"),

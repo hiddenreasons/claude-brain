@@ -283,7 +283,13 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin: 0; max-height: 50vh; overflow: auto;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .card { transition: none; }
-  .hud *, .hud *::before, .hud *::after, .hud-scroll::after, .hud-blink { animation: none !important; }
+/* Calm motion: set by brains.js from the system's Reduce Motion setting or the page's Motion switch */
+html.calm .card { transition: none; }
+html.calm .hud *, html.calm .hud *::before, html.calm .hud *::after, html.calm .hud-scroll::after, html.calm .hud-blink {
+  animation: none !important;
 }
+.motion-toggle {
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 8px;
+  padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.motion-toggle:hover { color: var(--text); border-color: var(--muted); }

@@ -22,7 +22,17 @@
   const DECAY_S = 2.2;
   const MAX_SPARKS = 700;
   const TRACE_S = 45;
-  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Motion follows the system's Reduce Motion setting unless the viewer picked Full or Calm on the page.
+  const MOTION_KEY = "claude-brain-motion";
+  let motionChoice = null;
+  try {
+    motionChoice = localStorage.getItem(MOTION_KEY);
+  } catch (e) {
+    motionChoice = null; // storage can be blocked; fall back to the system setting
+  }
+  const systemCalm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduceMotion = motionChoice === "calm" || (motionChoice !== "full" && systemCalm);
+  document.documentElement.classList.toggle("calm", reduceMotion);
 
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
@@ -323,6 +333,7 @@
       if (!haveVideo) onReady({ el: img, kind: "image" });
     };
     img.src = `/media/${who}-brain.png`;
+    if (reduceMotion) return; // the still is enough when the viewer asked for less motion
     // Two copies of the clip, so the end can crossfade into the start: no visible jump at the loop.
     const make = () => {
       const v = document.createElement("video");
@@ -334,10 +345,22 @@
     };
     const a = make();
     const b = make();
+    const art = { kind: "video", a, b, active: a };
+    // If the page was in the background (no animation frames), the crossfade never ran: just hand over.
+    for (const [mine, next] of [[a, b], [b, a]]) {
+      mine.addEventListener("ended", () => {
+        if (art.active !== mine) return;
+        art.active = next;
+        if (next.paused) {
+          next.currentTime = 0;
+          next.play().catch(() => {});
+        }
+      });
+    }
     a.addEventListener("canplay", () => {
       haveVideo = true;
       a.play().catch(() => {});
-      onReady({ kind: "video", a, b, active: a });
+      onReady(art);
     }, { once: true });
   }
 
@@ -364,6 +387,8 @@
       const size = r * 3;
       const v = art.active;
       const other = v === art.a ? art.b : art.a;
+      // Browsers refuse to start video in a hidden page; drawing means it's visible now, so start it.
+      if (v.paused && !v.ended) v.play().catch(() => {});
       const left = v.duration - v.currentTime;
       let mix = 0;
       if (Number.isFinite(left) && v.duration > CROSSFADE_S * 3 && left < CROSSFADE_S) {
@@ -808,6 +833,17 @@
   }
 
   window.BrainsVisual = BrainsVisual;
+  window.BrainsVisual.motion = { calm: reduceMotion, choice: motionChoice, systemCalm };
+  window.BrainsVisual.setMotion = (choice) => {
+    try {
+      localStorage.setItem(MOTION_KEY, choice);
+    } catch (e) {
+      // can't remember it; the reload below still applies nothing new, so tell the caller
+      return false;
+    }
+    location.reload(); // artwork and animation loops are set up at load
+    return true;
+  };
   window.BrainsVisual.kindLabel = (kind) => KIND_LABELS[kind] || kind;
   window.BrainsVisual.directionLabel = directionLabel;
 })();

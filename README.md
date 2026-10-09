@@ -33,6 +33,10 @@ At the top, Claude's brain (orange, left) and MAC's brain (blue, right). A bolt 
 
 The brains are Codex's artwork (`brain/static/media/*-brain.png`), or Runway idle loops (`*-loop.mp4`) when present; the page falls back to drawing its own. Either side has a HUD panel: Claude's 24 h outcomes, latest jobs and a hex grid of the last 60 jobs on the left; MAC's open-order age radar, counters, 24 h traffic chart and open orders on the right. Every shape in them is real data; hover or click for the item.
 
+The **Motion** switch at the top chooses Full (video loops, strobing strikes, HUD animation) or Calm (still brains, single strikes). It starts from the system's Reduce Motion setting and remembers your choice in this browser.
+
+The brain loops came from Runway (Veo 3.1, first and last frame set to Codex's stills), cropped to a square and re-encoded with VADER's ffmpeg. The page crossfades each clip's end into its start. The other takes (Kling O3 Pro) and a comparison sheet are in `imagery/candidates/`, which isn't committed.
+
 Hover a bolt, or a line in "Latest messages", to see the message. Messages that existed before the page opened don't fire. `http://localhost:8777/?demo` shows labeled sample bolts for checking the look; they are not real messages.
 
 | Panel | Where it comes from |
