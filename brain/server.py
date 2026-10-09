@@ -32,6 +32,7 @@ STATIC_FILES = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/volley.js": ("volley.js", "text/javascript; charset=utf-8"),
     "/synapse.js": ("synapse.js", "text/javascript; charset=utf-8"),
+    "/readable.js": ("readable.js", "text/javascript; charset=utf-8"),
     "/brains.js": ("brains.js", "text/javascript; charset=utf-8"),
     "/hud.js": ("hud.js", "text/javascript; charset=utf-8"),
     "/ask.js": ("ask.js", "text/javascript; charset=utf-8"),

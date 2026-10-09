@@ -903,8 +903,32 @@ function renderAll() {
 
 // ---------- job detail ----------
 
+// Raw text (run logs, errors) stays monospace. Reports, replies, orders and briefs are laid out as
+// formatted text: readable.js splits the markdown into blocks, built here with el() and md().
 function section(title, text) {
   return text ? [el("h3", {}, title), el("pre", {}, text)] : [];
+}
+
+function readableSection(title, text) {
+  return text ? [el("h3", {}, title), readable(text)] : [];
+}
+
+function readable(text) {
+  const block = (b) => {
+    if (b.type === "h") return el(`h${Math.min(6, b.level + 3)}`, { class: `rd-h rd-h${Math.min(3, b.level)}` }, md(b.text));
+    if (b.type === "p") return el("p", { class: "rd-p" }, md(b.text));
+    if (b.type === "code") return el("pre", { class: "rd-code" }, b.text);
+    if (b.type === "quote") return el("blockquote", { class: "rd-quote" }, md(b.text));
+    if (b.type === "hr") return el("hr", { class: "rd-hr" });
+    if (b.type === "table") {
+      return el("div", { class: "rd-table" }, el("table", {},
+        el("thead", {}, el("tr", {}, b.head.map((c) => el("th", {}, md(c))))),
+        el("tbody", {}, b.rows.map((row) => el("tr", {}, row.map((c) => el("td", {}, md(c)))))),
+      ));
+    }
+    return el(b.type, { class: "rd-list" }, b.items.map((it) => el("li", { class: `rd-d${Math.min(3, it.depth)}` }, md(it.text))));
+  };
+  return el("div", { class: "rd" }, window.Readable.parse(text).map(block));
 }
 
 async function openDetail(kind, id, title) {
@@ -919,8 +943,8 @@ async function openDetail(kind, id, title) {
     const d = await res.json();
     if (kind === "oneshot") {
       body.replaceChildren(
-        ...section("MAC's order to Claude", d.prompt),
-        ...section("Claude's result", d.result || "(no result yet)"),
+        ...readableSection("MAC's order to Claude", d.prompt),
+        ...readableSection("Claude's result", d.result || "(no result yet)"),
         ...section("Errors", d.errors && d.errors.trim()),
       );
     } else {
@@ -928,10 +952,10 @@ async function openDetail(kind, id, title) {
         ? [el("h3", {}, `Live activity (last ${d.activity.length})`), activityList(d.activity, 200)]
         : [];
       body.replaceChildren(
-        ...section("Report", d.report),
-        ...section("Final reply", d.last_result && d.last_result.text),
+        ...readableSection("Report", d.report),
+        ...readableSection("Final reply", d.last_result && d.last_result.text),
         ...log,
-        ...section("Brief from MAC", d.brief),
+        ...readableSection("Brief from MAC", d.brief),
         ...section("Run log", d.runs_log),
       );
     }

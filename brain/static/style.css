@@ -544,6 +544,38 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
   background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(var(--wire-rgb), 0.14); border-radius: 6px; padding: 10px; margin: 0; max-height: 50vh; overflow: auto;
 }
 
+/* ---------- readable reports in the job window ---------- */
+.rd {
+  font: 14px/1.65 var(--ui); color: #e3eaee; overflow-wrap: anywhere;
+  background: rgba(0, 0, 0, 0.32); border: 1px solid rgba(var(--wire-rgb), 0.14); border-radius: 8px; padding: 14px 18px;
+}
+.rd > :first-child { margin-top: 0; }
+.rd > :last-child { margin-bottom: 0; }
+.rd-p { margin: 0 0 12px; white-space: pre-line; }
+.rd-h { margin: 20px 0 8px; color: #fff; font-family: var(--ui); letter-spacing: 0; text-transform: none; border: 0; padding: 0; }
+.rd-h1 { font-size: 17px; font-weight: 650; }
+.rd-h2 { font-size: 15px; font-weight: 650; color: var(--wire); }
+.rd-h3 { font-size: 14px; font-weight: 600; color: #cfe3ec; }
+#detail-body .rd h4::before, #detail-body .rd h5::before, #detail-body .rd h6::before { content: none; }
+.rd-list { margin: 0 0 12px; padding-left: 20px; }
+.rd-list li { margin: 4px 0; white-space: pre-line; }
+.rd-list li::marker { color: rgba(var(--wire-rgb), 0.8); }
+.rd-list .rd-d1 { margin-left: 18px; }
+.rd-list .rd-d2 { margin-left: 36px; }
+.rd-list .rd-d3 { margin-left: 54px; }
+.rd code { font-size: 12.5px; padding: 1px 5px; }
+#detail-body .rd-code {
+  margin: 0 0 12px; max-height: none; font: 12.5px/1.55 var(--mono); color: #d8e7ee;
+  background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(var(--wire-rgb), 0.18); border-radius: 6px; padding: 10px 12px;
+}
+.rd-quote { margin: 0 0 12px; padding: 4px 12px; border-left: 2px solid rgba(var(--wire-rgb), 0.6); color: var(--muted); white-space: pre-line; }
+.rd-hr { border: 0; border-top: 1px solid rgba(var(--wire-rgb), 0.18); margin: 16px 0; }
+.rd-table { overflow-x: auto; margin: 0 0 12px; }
+.rd-table table { border-collapse: collapse; width: 100%; font-size: 13px; line-height: 1.45; }
+.rd-table th, .rd-table td { text-align: left; vertical-align: top; padding: 6px 10px; border-bottom: 1px solid rgba(var(--wire-rgb), 0.12); }
+.rd-table th { font: 600 10px/1.4 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: rgba(var(--wire-rgb), 0.85); border-bottom-color: rgba(var(--wire-rgb), 0.3); }
+.rd-table tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.025); }
+
 /* ---------- words, resolutions, decisions ---------- */
 .word-good { color: var(--done); font-weight: 600; }
 .word-bad { color: var(--bad-text); font-weight: 600; }
