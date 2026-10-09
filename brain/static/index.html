@@ -34,6 +34,7 @@
   </header>
 
   <p class="selfcheck" id="selfcheck" role="status" hidden></p>
+  <p class="overdue" id="overdue" role="alert" hidden></p>
   <section class="statusbar" id="statusbar" aria-label="At a glance"></section>
   <p class="legend" aria-label="What the badges mean">
     <span class="legend-k">legend</span>
@@ -105,6 +106,12 @@
       <section aria-labelledby="h-changelog" class="panel">
         <h2 id="h-changelog">MAC change log</h2>
         <ul class="bullets" id="changelog"></ul>
+      </section>
+
+      <section aria-labelledby="h-ops" class="panel">
+        <h2 id="h-ops">Operations</h2>
+        <p class="source">Shown only: the Brain never changes jobs, branches or files</p>
+        <ul class="ops" id="ops"></ul>
       </section>
 
       <section aria-labelledby="h-audit" class="panel">

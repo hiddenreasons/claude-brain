@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import foundation, gitread, selfcheck
+from . import foundation, gitread, ops, selfcheck
 from .codex import read_codex
 from .comms import TAIL_BYTES as COMMS_TAIL
 from .comms import comms_path, parse_comms
@@ -290,5 +290,33 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         for j in snapshot["codex"]["failed"]
     ]
     snapshot["windows_box"] = read_windows_status(cfg.runs_dir, now)
+    # Operations: usage, loops, restart storms, time in state, decision IDs, branch hygiene, conflicts.
+    snapshot["ops"] = ops.apply(snapshot, cfg.vader_dir, cfg.runs_dir, now, comms)
+    # Restart storms and possible loops are MAC's to look at, never Anthony's.
+    snapshot["mac_attention"] += [
+        {
+            "source": "restart",
+            "id": s["id"],
+            "state": "restart storm",
+            "title": f"{s['id']}: restart storm",
+            "detail": s["why"],
+            "machine": "MAC",
+            "at": s["since"],
+            "up_next": "MAC",
+        }
+        for s in snapshot["ops"]["storms"]
+    ] + [
+        {
+            "source": "loop",
+            "id": lp["id"],
+            "state": "possible loop",
+            "title": f"{lp['id']}: possible loop",
+            "detail": lp["why"],
+            "machine": "MAC",
+            "at": None,
+            "up_next": "MAC",
+        }
+        for lp in snapshot["ops"]["loops"]
+    ]
     snapshot["selfcheck"] = selfcheck.run(snapshot, cfg.status_path, cfg.runs_dir, now)
     return snapshot

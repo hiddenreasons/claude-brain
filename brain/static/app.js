@@ -38,6 +38,11 @@ function foundationLine(item) {
   else if (item.verified === false) bits.push(el("span", { class: "unverified", title: "DONE without a commit, test result or file path" }, "UNVERIFIED"));
   for (const why of item.drift || []) bits.push(el("span", { class: "drift", title: why }, "DRIFT"), el("span", { class: "drift-why" }, why));
   if (item.lifecycle_why && item.lifecycle !== "running") bits.push(el("span", { class: "life-why" }, item.lifecycle_why));
+  if (item.state_since && item.lifecycle && item.lifecycle !== "done" && item.lifecycle !== "resolved") {
+    bits.push(el("span", { class: "since", title: `${item.lifecycle} since ${item.state_since}` }, `${item.lifecycle} ${elapsed(item.state_since)}`));
+  }
+  for (const flag of item.flags || []) bits.push(el("span", { class: "flag-red", title: flag }, flag.split(":")[0]));
+  if (item.no_decision_id) bits.push(el("span", { class: "unverified", title: "Briefs written since the decision log started must cite the A-xxx IDs they follow" }, "NO A-ID"));
   return bits.length ? el("div", { class: "fnd" }, bits) : null;
 }
 const demoMode = new URLSearchParams(location.search).has("demo");
@@ -287,6 +292,8 @@ function actionLine(item) {
 function groupedList(listId, items, cardFn, which) {
   const groups = Object.fromEntries(ACTIONS.map(([a]) => [a, []]));
   for (const item of items) (groups[item.action] || groups.queued).push(item);
+  // What has waited on Anthony longest goes first.
+  groups.needs_anthony.sort((a, b) => (a.state_since || "~").localeCompare(b.state_since || "~"));
   const nodes = [];
   for (const [action, title] of ACTIONS.slice(0, 3)) {
     if (!groups[action].length) continue;
@@ -1091,6 +1098,35 @@ function placeWinBox() {
   box.style.setProperty("top", `${Math.round(st.cy + 22)}px`);
 }
 
+// Anything waiting on Anthony for 30+ minutes, at the top of the page.
+function renderOverdue() {
+  const list = ((snap.ops || {}).overdue || []);
+  const box = document.getElementById("overdue");
+  box.hidden = !list.length;
+  box.replaceChildren(el("b", {}, "WAITING ON YOU"), ...list.slice(0, 4).map((o) =>
+    el("span", { class: "od" }, ` ${o.id}${o.title ? ` · ${clipText(o.title, 60)}` : ""} · ${o.minutes >= 60 ? `${Math.floor(o.minutes / 60)} h ${o.minutes % 60} m` : `${o.minutes} m`}`)));
+}
+
+// Operations: usage, loops, restart storms, conflicts, branch hygiene and decision IDs (shown only).
+function renderOps() {
+  const o = snap.ops || {};
+  const rows = [];
+  const row = (label, tone, ...content) => rows.push(el("li", { class: `op op-${tone}` }, el("span", { class: "op-k" }, label), el("span", { class: "op-v" }, ...content)));
+  const usage = o.usage || {};
+  row("usage", usage.found ? "ok" : "dim", usage.found
+    ? Object.entries(usage.machines).map(([m, u]) => `${m} ${u.left_pct === null ? "?" : `${u.left_pct}% left`}`).join(" · ") || "no machines reported"
+    : usage.note);
+  row("restart storms", (o.storms || []).length ? "bad" : "ok", (o.storms || []).length ? o.storms.map((x) => `${x.id}: ${x.why}`).join(" · ") : "none in the last hour");
+  row("possible loops", (o.loops || []).length ? "warn" : "ok", (o.loops || []).length ? o.loops.map((x) => `${x.id}: ${x.why}`).join(" · ") : "none");
+  row("mac ⇄ windows", (o.conflicts || []).length ? "warn" : "ok", (o.conflicts || []).length ? o.conflicts.map((x) => x.why).join(" · ") : "no shared branch or file");
+  row("decision IDs", (o.no_decision_id || []).length ? "warn" : "ok", (o.no_decision_id || []).length ? `briefs with no A-xxx: ${o.no_decision_id.join(", ")}` : "every live brief cites one");
+  const h = o.hygiene || { merged: [], stale: [], stale_total: 0 };
+  row("merged branches", h.merged.length ? "info" : "ok", h.merged.length ? `${h.merged.length} could be cleaned up: ${h.merged.slice(0, 8).join(", ")}${h.merged.length > 8 ? " …" : ""}` : "none");
+  row("work 24 h+ uncommitted", h.stale_total ? "warn" : "ok", h.stale_total
+    ? `${h.stale_total} files: ${h.stale.slice(0, 5).map((x) => `${x.where} ${x.file} (${x.days} d)`).join(", ")}` : "none");
+  document.getElementById("ops").replaceChildren(...rows);
+}
+
 function renderAll() {
   if (!snap) return;
   if (window.renderHud) window.renderHud(snap);
@@ -1098,6 +1134,8 @@ function renderAll() {
   renderHero();
   renderTerminal();
   renderSelfcheck();
+  renderOverdue();
+  renderOps();
   renderAudit();
   renderWinBox();
   renderAttention();

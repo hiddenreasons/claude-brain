@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from datetime import datetime
 from typing import Any, Dict, List
 
 from .brainfiles import BrainFiles, Ledger, audit
@@ -95,7 +96,64 @@ class Recorder:
                 "Anthony / MAC (STATUS.md)",
             ):
                 counts["decisions"] += 1
+        day = datetime.now().astimezone().date().isoformat()
+        if self.files.write(f"digest-{day}.md", digest_text(snapshot, day)):
+            counts["digest"] = 1
         return counts
+
+
+def digest_text(snapshot: Dict[str, Any], day: str) -> str:
+    """End-of-day summary: done / blocked / waiting on Anthony / lessons proposed (rewritten through the day)."""
+    jobs = snapshot.get("folders", []) + snapshot.get("oneshots", [])
+
+    def on_day(iso_ts: Any) -> bool:
+        if not iso_ts:
+            return False
+        try:
+            return datetime.fromisoformat(str(iso_ts)).astimezone().date().isoformat() == day
+        except ValueError:
+            return False
+
+    done = [j for j in jobs if j.get("lifecycle") in ("done", "resolved") and on_day(j.get("updated_at"))]
+    blocked = [
+        j
+        for j in jobs + snapshot.get("remote_jobs", [])
+        if j.get("lifecycle") in ("blocked", "stalled") and on_day(j.get("updated_at") or j.get("last_at"))
+    ]
+    waiting = [i for i in jobs + snapshot.get("inbox", []) if i.get("up_next") == "Anthony"]
+    decisions = [d for d in (snapshot.get("status") or {}).get("decision_items", []) if d.get("up_next") == "Anthony"]
+    lessons = (snapshot.get("learning") or {}).get("proposed", [])
+    codex = (snapshot.get("codex") or {}).get("today", {})
+
+    def name(i: Dict[str, Any]) -> str:
+        title = str(i.get("title") or "")
+        return title if title.lower().startswith(str(i["id"]).lower()) else f"{i['id']}: {title}".rstrip(": ")
+
+    def proof(j: Dict[str, Any]) -> str:
+        p = j.get("proof")
+        return f"{p['kind']} {p['text']}" if p else "UNVERIFIED"
+
+    lines = [
+        f"# Claude Brain digest, {day}",
+        "",
+        "Written by Claude Brain (read-only view of MAC and Claude). Updated through the day.",
+        "",
+    ]
+    lines += [f"## Done ({len(done)})", ""] + [f"- {name(j)} ({proof(j)})" for j in done] + [""]
+    lines += [f"## Blocked or stalled ({len(blocked)})", ""]
+    lines += [
+        f"- {j['id']}: {j.get('lifecycle_why') or j.get('report_headline') or j.get('state')}" for j in blocked
+    ] + [""]
+    lines += [f"## Waiting on Anthony ({len(waiting) + len(decisions)})", ""]
+    lines += [f"- {name(i)}" for i in waiting] + [f"- decision: {d['text'][:200]}" for d in decisions] + [""]
+    lines += [
+        "## Codex today",
+        "",
+        f"- {codex.get('done', 0)} picture jobs done, {codex.get('pictures', 0)} pictures",
+        "",
+    ]
+    lines += [f"## Lessons proposed ({len(lessons)})", ""] + [f"- {lesson['title']}" for lesson in lessons] + [""]
+    return "\n".join(lines)
 
 
 def safe_record(recorder: Recorder | None, snapshot: Dict[str, Any]) -> Dict[str, int]:

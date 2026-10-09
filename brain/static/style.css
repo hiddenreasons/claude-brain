@@ -618,6 +618,22 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .for-mac { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(20, 200, 180, 0.4); }
 .for-mac-h { margin: 0 0 6px; font: 600 9.5px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: #7ff3e4; }
 
+/* ---------- operations ---------- */
+.overdue { margin: 8px 20px 0; padding: 8px 12px; border-radius: 8px; font: 12.5px/1.4 var(--ui); color: #fff;
+  background: linear-gradient(90deg, rgba(225, 6, 0, 0.45), rgba(225, 6, 0, 0.12)); border: 1px solid var(--you); }
+.overdue b { font: 800 11px var(--mono); letter-spacing: 0.14em; margin-right: 6px; }
+.ops { list-style: none; margin: 0; padding: 0; font: 11.5px/1.45 var(--mono); }
+.op { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(var(--wire-rgb), 0.08); }
+.op-k { color: rgba(var(--wire-rgb), 0.8); text-transform: uppercase; letter-spacing: 0.1em; font-size: 9.5px; padding-top: 2px; }
+.op-v { color: #cfdde4; overflow-wrap: anywhere; }
+.op-ok .op-v { color: var(--done-2); }
+.op-bad .op-v { color: var(--bad-text); font-weight: 700; }
+.op-warn .op-v { color: var(--help); }
+.op-dim .op-v { color: var(--dim); }
+.since { color: var(--muted); }
+.flag-red { color: #fff; background: var(--accent); border-radius: 3px; padding: 2px 6px; font-weight: 700; letter-spacing: 0.08em; }
+@media (max-width: 760px) { .overdue { margin-left: 16px; margin-right: 16px; } .op { grid-template-columns: 1fr; gap: 2px; } }
+
 /* ---------- the WINDOWS box between the Death Stars ---------- */
 .win-box {
   position: absolute; left: 50%; top: 55%; transform: translateX(-50%); z-index: 2; min-width: 230px; max-width: 300px;

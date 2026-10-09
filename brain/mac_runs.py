@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .guard import PLACEHOLDER_RE, placeholders
+from .guard import DECISION_ID_RE, PLACEHOLDER_RE, placeholders
 from .readers import FileCache, clip, iso, mtime_iso, read_tail, read_text
 
 MSG_RE = re.compile(r"^msg(?P<id>[A-Za-z0-9_-]+)\.txt$")
@@ -371,6 +371,8 @@ def _job_folder(path: Path, children: Dict[str, os.DirEntry], cache: FileCache, 
         "machine": "MAC",
         "path": str(path),
         "placeholders": placeholders(brief),
+        "decision_ids": sorted(set(DECISION_ID_RE.findall(brief or ""))),
+        "brief_at": iso(mtime("brief.md")) if mtime("brief.md") else None,
         "state": state,
         "iteration": latest,
         "model": runs["model"],
