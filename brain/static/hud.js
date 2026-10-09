@@ -262,9 +262,9 @@ function renderHud(s) {
         { value: count(["blocked", "error", "gate_failed", "stalled", "no_report"]), color: HUD_COLORS.blocked, label: "Stuck" },
       ], day.length, "24 H", "Outcomes · last 24 h"),
       ring([
-        { value: Math.min(avgMin || 0, 60), color: "#ff9628", label: "Avg minutes per one-shot job" },
-        { value: Math.max(0, 60 - Math.min(avgMin || 0, 60)), color: "rgba(255,150,40,0.12)", label: "Of a 60 min scale" },
-      ], avgMin === null ? "—" : `${avgMin}m`, avgMin === null ? "NO DATA" : "AVG", "Avg one-shot run · 24 h"),
+        { value: Math.min(avgMin || 0, 120), color: "#ff9628", label: `Avg minutes per job (${finished.length} finished in 24 h)` },
+        { value: Math.max(0, 120 - Math.min(avgMin || 0, 120)), color: "rgba(255,150,40,0.12)", label: "Of a 2 h scale" },
+      ], avgMin === null ? "—" : `${avgMin}m`, avgMin === null ? "NO DATA" : "AVG", "Avg job run · 24 h"),
       el("div", { class: "hud-stats" },
         stat(`$${cost.toFixed(0)}`, "list-price est · 24 h", "done"),
         stat(count(["running", "waiting"]), "running now", "running"),

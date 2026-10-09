@@ -165,6 +165,22 @@ def test_folder_running_when_stream_is_fresh_and_not_done(tree):
     assert (job["model"], job["effort"], job["iteration"]) == ("opus", "high", 1)
 
 
+def test_folder_run_time_adds_up_every_iteration_once_the_job_stops(tree):
+    job = make_job(tree.runs_dir, "timed")
+    write(job / "iter-1.jsonl", stream(said("One."), {**result_event("ok"), "duration_ms": 300_000}))
+    write(job / "iter-2.jsonl", stream(said("Two."), {**result_event("ok"), "duration_ms": 120_000}))
+    write(job / "iter-2.done", "")
+    assert folder(scan_job_folders(tree.runs_dir, FileCache()), "timed")["duration_s"] == 420
+
+
+def test_folder_run_time_is_unknown_while_running_or_when_not_recorded(tree):
+    make_job(tree.runs_dir, "live", done=False)
+    make_job(tree.runs_dir, "untimed")  # its stream has no result event
+    jobs = scan_job_folders(tree.runs_dir, FileCache())
+    assert folder(jobs, "live")["duration_s"] is None
+    assert folder(jobs, "untimed")["duration_s"] is None
+
+
 def test_folder_stalled_when_stream_is_old_and_no_live_process(tree):
     make_job(tree.runs_dir, "dead", done=False, stream_age=2 * HOUR)
     write(tree.runs_dir / "dead" / "claude.pid", "999999")  # no such process

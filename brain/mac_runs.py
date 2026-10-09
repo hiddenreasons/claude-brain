@@ -171,6 +171,9 @@ def parse_activity(text: str, limit: int = 40) -> Dict[str, Any]:
                 "ok": event.get("subtype") == "success" and not event.get("is_error"),
                 "text": clip(event.get("result") if isinstance(event.get("result"), str) else None, 1200),
                 "cost_usd": event.get("total_cost_usd"),
+                "duration_s": round(event["duration_ms"] / 1000)
+                if isinstance(event.get("duration_ms"), (int, float))
+                else None,
             }
             continue
         if kind != "assistant":
@@ -341,8 +344,11 @@ def _job_folder(path: Path, children: Dict[str, os.DirEntry], cache: FileCache, 
         state = "done"
 
     times = [t for t in (mtime(n) for n in children) if t is not None]
+    # How long Claude ran, over every iteration; only once the job has stopped (the HUD averages these).
+    stopped = state not in ("running", "waiting")
     return {
         "kind": "folder",
+        "duration_s": _run_seconds(path, iters, latest, activity, cache) if stopped else None,
         "id": path.name,
         "title": brief_title(brief, path.name),
         "state": state,
@@ -364,6 +370,27 @@ def _job_folder(path: Path, children: Dict[str, os.DirEntry], cache: FileCache, 
         "activity": activity.get("actions") or [],
         "last_result": last_result,
     }
+
+
+def _run_seconds(
+    path: Path, iters: List[int], latest: Optional[int], activity: Dict[str, Any], cache: FileCache
+) -> Optional[int]:
+    """Sum of the result events' duration_ms across a job's iterations, in seconds (None if none recorded)."""
+    total, found = 0, False
+    for n in iters:
+        act = (
+            activity
+            if n == latest
+            else cache.get(
+                path / f"iter-{n}.jsonl",
+                "activity",
+                lambda p: parse_activity(read_tail(p, ACTIVITY_TAIL_BYTES) or "", limit=12),
+            )
+        )
+        seconds = (act.get("result") or {}).get("duration_s")
+        if isinstance(seconds, (int, float)):
+            total, found = total + seconds, True
+    return total if found else None
 
 
 HARNESS_FILES = {"runs.log", "claude.pid", "run.pid", "waiter.pid", "LAUNCHED", "iter", "GATE-PASSED", "gate-check.log"}
