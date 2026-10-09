@@ -29,7 +29,7 @@ def test_replies_keep_direction_order_and_blocked_flag():
     wo19 = by_title(parse_inbox(INBOX), "Schedule two Shorts")
     assert [r["direction"] for r in wo19["replies"]] == ["to_mac", "from_mac", "to_mac"]
     assert wo19["replies"][0]["blocked"] is True
-    assert wo19["replies"][1]["text"].startswith("9:41 AM ET")
+    assert wo19["replies"][1]["text"].startswith("(9:41 AM ET): Both")
     # The last word from Claude is DONE, so the earlier BLOCKED no longer counts.
     assert wo19["state"] == "DONE" and wo19["needs_attention"] is False
 

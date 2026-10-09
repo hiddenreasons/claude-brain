@@ -109,7 +109,7 @@ def parse_inbox(text: str) -> List[Dict[str, Any]]:
         reply = REPLY_RE.match(line)
         if reply:
             direction = "to_mac" if reply.group("dir") == "TO MAC" else "from_mac"
-            reply_text = reply.group("text").lstrip(":( ").strip()
+            reply_text = reply.group("text").lstrip(": ").strip()
             current["replies"].append(
                 {
                     "direction": direction,

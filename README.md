@@ -2,7 +2,7 @@
 
 A live, read-only page that shows the work going on between MAC (Grok Bot) and Claude on VADER and Hidden Reasons.
 
-It refreshes by itself within a couple of seconds of any change. It only reads files: it never writes, deletes, posts or runs anything in VADER, Hidden Reasons or MAC's runs folder.
+It refreshes by itself within a couple of seconds of any change. It never writes, deletes, posts or runs anything in VADER, Hidden Reasons or MAC's runs folder. The only place it writes is its own Obsidian vault.
 
 ## Start it
 
@@ -24,6 +24,15 @@ python3 -m brain --check
 
 ## What it shows
 
+At the top, Claude's brain (orange, left) and MAC's brain (blue, right). A bolt fires only when a real message passes between them:
+
+- **Blue bolt, MAC to Claude:** a new work order, a job sent, a `FROM MAC` reply.
+- **Orange bolt, Claude to MAC:** a `TO MAC` reply, a report written, a one-shot job's result.
+- **Red bolt with a white-hot core:** anything BLOCKED, or a job that errored.
+- **Faint steady arc:** a MAC job is running right now.
+
+Hover a bolt, or a line in "Latest messages", to see the message. Messages that existed before the page opened don't fire. `http://localhost:8777/?demo` shows labeled sample bolts for checking the look; they are not real messages.
+
 | Panel | Where it comes from |
 |---|---|
 | Needs attention | Blocked work orders, failed startup gates, stalled or errored jobs from the last 3 days |
@@ -44,6 +53,15 @@ Job states, in plain words:
 
 Costs shown on jobs are Claude's own list-price estimates from the result files, not charges. The Max plan doesn't bill per job.
 
+## Obsidian notes
+
+While it runs, the Brain keeps one note per MAC work order and per job in the Obsidian vault at `~/Documents/Active Projects/Claude Brain Vault`, plus a `Claude Brain` index note. Notes link to each other (a work order lists the jobs that mention it), so Obsidian's graph shows the connections.
+
+- Each note has a line that reads `claude-brain:end`. Everything above it is rewritten when the source changes. **Anything you write below it is kept.**
+- Delete that line and the note becomes yours: the Brain never touches it again.
+- The Brain never deletes a note, and writes nowhere outside the vault. It refuses to start the export if the vault is inside VADER or MAC's runs folder.
+- Turn it off with `python3 -m brain --no-export`.
+
 ## Settings
 
 Environment variables, all optional:
@@ -53,11 +71,13 @@ Environment variables, all optional:
 | `BRAIN_VADER_DIR` | `~/Documents/Active Projects/VADER` |
 | `BRAIN_RUNS_DIR` | `~/.vader-mac-runs` |
 | `BRAIN_PORT` | `8777` (VADER uses 8765) |
+| `BRAIN_VAULT_DIR` | `~/Documents/Active Projects/Claude Brain Vault` |
 
 `--port 8778` on the command line also works.
 
 ## Safety
 
+- Reads VADER, Hidden Reasons and MAC's runs folder; writes only into the Obsidian vault.
 - Listens on this Mac only (127.0.0.1), and answers only requests addressed to localhost.
 - GET only. There is no endpoint that changes anything.
 - All text from files is shown as text, never as HTML, and the page loads nothing from the internet.
@@ -71,7 +91,7 @@ Environment variables, all optional:
 ## Development
 
 ```bash
-~/.vader/env/bin/python -m pytest          # 62 tests; the 7 server tests need permission to open a local port
+~/.vader/env/bin/python -m pytest          # the 7 server tests need permission to open a local port
 ~/.vader/env/bin/python -m ruff check .
 ~/.vader/env/bin/python -m ruff format .
 ```

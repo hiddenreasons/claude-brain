@@ -116,6 +116,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
             "issues": _source(cfg.issues_path),
         },
         "attention": build_attention(inbox, folders, oneshots, now),
+        "running_count": sum(j["state"] == "running" for j in folders) + sum(j["state"] == "waiting" for j in oneshots),
         "folders": folders,
         "oneshots": oneshots[:ONESHOT_LIMIT],
         "oneshot_total": len(oneshots),

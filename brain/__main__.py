@@ -18,6 +18,7 @@ def main(argv=None) -> int:
     parser.add_argument("--port", help="port to listen on (default 8777, or BRAIN_PORT)")
     parser.add_argument("--host", default="127.0.0.1", choices=LOOPBACK_HOSTS, help="loopback only")
     parser.add_argument("--check", action="store_true", help="print a summary of what the Brain can see, then exit")
+    parser.add_argument("--no-export", action="store_true", help="don't write notes into the Obsidian vault")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(message)s")
@@ -29,7 +30,7 @@ def main(argv=None) -> int:
     except ValueError as exc:
         print(f"brain: {exc}", file=sys.stderr)
         return 2
-    cfg = dataclasses.replace(cfg, host=args.host)
+    cfg = dataclasses.replace(cfg, host=args.host, export=not args.no_export)
 
     if args.check:
         return check(cfg)

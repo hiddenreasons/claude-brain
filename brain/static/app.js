@@ -16,6 +16,7 @@ const JOB_LIST_LIMIT = 80;
 const FRESH_MS = 90_000;
 
 const ui = { jobFilter: "all", orderFilter: "active", query: "", openOrders: new Set() };
+const demoMode = new URLSearchParams(location.search).has("demo");
 let snap = null;
 let firstLoad = true;
 let connected = false;
@@ -333,8 +334,73 @@ function renderLogs() {
   );
 }
 
+// ---------- brains and lightning ----------
+
+let brains = null;
+let messagesPrimed = false;
+const seenMessages = new Set();
+const MAX_BOLTS_PER_UPDATE = 6;
+
+function handleMessages(s) {
+  const messages = s.messages || [];
+  const fresh = messages.filter((m) => !seenMessages.has(m.id));
+  for (const m of messages) seenMessages.add(m.id);
+  if (brains) brains.setRunning(s.running_count || 0);
+  if (!messagesPrimed) {
+    messagesPrimed = true; // messages already there when the page opened don't fire
+    return;
+  }
+  // Oldest first, a beat apart, so a burst reads as separate messages.
+  fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m, i) => setTimeout(() => brains && brains.fire(m), i * 350));
+}
+
+function messageItem(m) {
+  const dir = window.BrainsVisual ? window.BrainsVisual.directionLabel(m) : m.direction;
+  const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
+  const open = () => (m.ref.source === "job" ? openDetail(m.ref.kind, m.ref.id, m.text) : revealOrder(m.ref.id));
+  return el("li", {},
+    el("button", {
+      type: "button", class: `msg-item ${m.blocked ? "blocked" : m.direction}`, "data-id": m.id,
+      onclick: open,
+      onmouseenter: () => brains && brains.highlight(m.id),
+      onmouseleave: () => brains && brains.highlight(null),
+      onfocus: () => brains && brains.highlight(m.id),
+      onblur: () => brains && brains.highlight(null),
+    },
+      el("span", { class: "dir" }, `${dir} · ${kind}${m.blocked ? " · BLOCKED" : ""} · `, timeEl(m.at)),
+      el("span", { class: "txt" }, m.text),
+    )
+  );
+}
+
+function renderMessages() {
+  const timed = (snap.messages || []).filter((m) => m.at).slice(0, 6);
+  document.getElementById("messages").replaceChildren(
+    ...(timed.length ? timed.map(messageItem) : [el("li", {}, empty("No messages yet."))])
+  );
+}
+
+function startDemo() {
+  // ?demo shows sample bolts so the look can be checked. They are labeled and are not real messages.
+  document.querySelector(".brains-stage").append(el("span", { class: "preview-badge" }, "PREVIEW · SAMPLE BOLTS, NOT REAL MESSAGES"));
+  const samples = [
+    { direction: "to_claude", kind: "work_order", text: "Sample: WO #023 from MAC, rebuild the Channel page layout" },
+    { direction: "to_mac", kind: "report", text: "Sample: TO MAC: DONE. Commit 1a2b3c4 on claude/channel-layout" },
+    { direction: "to_mac", kind: "to_mac", text: "Sample: TO MAC: BLOCKED pre-commit tests fail in the sandbox", blocked: true },
+  ];
+  brains.setRunning(1);
+  let i = 0;
+  const next = () => {
+    brains.fire({ ...samples[i % samples.length], id: `demo-${i}` });
+    i += 1;
+  };
+  next();
+  setInterval(next, 2600);
+}
+
 function renderAll() {
   if (!snap) return;
+  renderMessages();
   renderAttention();
   renderRunning();
   renderJobs();
@@ -397,6 +463,7 @@ async function load() {
     if (!res.ok) throw new Error(res.statusText);
     snap = await res.json();
     trackChanges(snap);
+    if (!demoMode) handleMessages(snap);
     renderAll();
   } catch (err) {
     document.getElementById("live-text").textContent = `Can't load data: ${err.message}`;
@@ -430,6 +497,19 @@ function tick() {
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("search").addEventListener("input", (ev) => { ui.query = ev.target.value.trim(); renderAll(); });
   document.getElementById("detail-close").addEventListener("click", () => document.getElementById("detail").close());
+  if (window.BrainsVisual) {
+    brains = new window.BrainsVisual(
+      document.getElementById("brains-canvas"),
+      document.getElementById("bolt-tip"),
+      // Hovering a bolt lights its line in "Latest messages".
+      (id) => {
+        for (const node of document.querySelectorAll(".msg-item")) {
+          node.classList.toggle("lit", id !== null && node.getAttribute("data-id") === id);
+        }
+      },
+    );
+    if (demoMode) startDemo();
+  }
   connect();
   load();
   setInterval(tick, 20_000);

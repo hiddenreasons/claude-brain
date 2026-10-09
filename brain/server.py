@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,7 +17,9 @@ from urllib.parse import parse_qs, urlsplit
 
 from .config import Config
 from .mac_runs import MSG_RE, is_safe_id, job_detail
-from .readers import FileCache
+from .messages import derive_messages, stamp_and_sort
+from .obsidian import VaultExporter, check_vault
+from .readers import FileCache, iso
 from .snapshot import build_snapshot, fingerprint
 
 log = logging.getLogger("brain")
@@ -25,6 +28,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/brains.js": ("brains.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
 SECURITY_HEADERS = {
@@ -41,14 +45,17 @@ SSE_HEARTBEAT_S = 15.0
 class BrainState:
     """Holds the latest snapshot and wakes live-stream clients when it changes."""
 
-    def __init__(self, cfg: Config) -> None:
+    def __init__(self, cfg: Config, exporter_factory=None) -> None:
         self.cfg = cfg
         self.cache = FileCache()
+        self.exporter = exporter_factory(self.cache) if exporter_factory else None
+        self._export_logged = False
         self.cond = threading.Condition()
         self.version = 0
         self.snapshot_bytes = b"{}"
         self._fingerprint: Optional[str] = None
         self._known_ids: Dict[str, set] = {"oneshot": set(), "folder": set()}
+        self._first_seen: Dict[str, Optional[str]] = {}
         self.stopping = threading.Event()
 
     def refresh(self, force: bool = False) -> bool:
@@ -56,6 +63,9 @@ class BrainState:
         if not force and fp == self._fingerprint:
             return False
         snapshot = build_snapshot(self.cfg, self.cache)
+        snapshot["messages"] = stamp_and_sort(
+            derive_messages(snapshot), self._first_seen, iso(time.time()), initial=self.version == 0
+        )
         payload = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
         with self.cond:
             self._fingerprint = fp
@@ -67,7 +77,20 @@ class BrainState:
             }
             self.version += 1
             self.cond.notify_all()
+        if self.exporter is not None:
+            self._export(snapshot)
         return True
+
+    def _export(self, snapshot: Dict[str, Any]) -> None:
+        try:
+            stats = self.exporter.export(snapshot)
+        except Exception:  # a vault problem must never stop the live page
+            log.exception("Obsidian export failed; will retry on the next change")
+            return
+        changed = {k: v for k, v in stats.items() if k != "unchanged"}
+        if not self._export_logged or changed:
+            log.info("Obsidian vault: %s", ", ".join(f"{v} {k}" for k, v in sorted(stats.items())))
+            self._export_logged = True
 
     def _all_oneshot_ids(self) -> set:
         try:
@@ -189,8 +212,22 @@ def make_handler(state: BrainState):
     return Handler
 
 
+def exporter_factory_for(cfg: Config):
+    """Returns a factory for the Obsidian exporter, or None (with a reason logged) when export is off or unsafe."""
+    if not cfg.export or cfg.vault_dir is None:
+        log.info("Obsidian export is off")
+        return None
+    try:
+        check_vault(cfg.vault_dir, [cfg.vader_dir, cfg.runs_dir])
+    except ValueError as exc:
+        log.warning("Obsidian export is off: %s", exc)
+        return None
+    log.info("Obsidian export on: writing notes into %s (and nowhere else)", cfg.vault_dir)
+    return lambda cache: VaultExporter(cfg.vault_dir, [cfg.vader_dir, cfg.runs_dir], cfg.runs_dir, cache)
+
+
 def serve(cfg: Config) -> None:
-    state = BrainState(cfg)
+    state = BrainState(cfg, exporter_factory_for(cfg))
     state.refresh(force=True)
     httpd = ThreadingHTTPServer((cfg.host, cfg.port), make_handler(state))
     httpd.daemon_threads = True
