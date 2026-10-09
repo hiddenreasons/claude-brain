@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import foundation, gitread, selfcheck
+from .codex import read_codex
 from .comms import TAIL_BYTES as COMMS_TAIL
 from .comms import comms_path, parse_comms
 from .config import Config
@@ -272,5 +273,20 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     snapshot["foundation"] = foundation.apply(snapshot, comms)
     for job in folders:
         job.pop("report_head", None)
+    # Codex picture jobs (read-only): running ones, failures for MAC, today's counts.
+    snapshot["codex"] = read_codex(cfg.runs_dir, now)
+    snapshot["mac_attention"] = [
+        {
+            "source": "codex",
+            "id": j["job"],
+            "state": "failed",
+            "title": f"Codex {j['job']} failed",
+            "detail": j["result"] or "no result given",
+            "machine": j["machine"],
+            "at": j["ended_at"],
+            "up_next": "MAC",
+        }
+        for j in snapshot["codex"]["failed"]
+    ]
     snapshot["selfcheck"] = selfcheck.run(snapshot, cfg.status_path, cfg.runs_dir, now)
     return snapshot

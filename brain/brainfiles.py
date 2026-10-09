@@ -19,7 +19,8 @@ from typing import Any, Dict, Iterable, List, Optional
 LOGS = {"audit.jsonl", "alerts.jsonl", "learning.jsonl", "recommendations.jsonl", "lessons.jsonl"}
 PAGES = {"RECOMMENDATIONS.md", "PROPOSED-LESSONS.md", "LEARNING-LOG.md"}
 DATED_RE = re.compile(r"^(?:digest-\d{4}-\d{2}-\d{2}|weekly-\d{4}-W\d{2})\.md$")
-NEVER = {"comms.jsonl"}  # MAC's message log: the Brain reads it, never writes it
+# MAC's files in the same folder: the Brain reads them, never writes them
+NEVER = {"comms.jsonl", "codex-status.jsonl", "windows-status.json", "codex-status-ingest.py"}
 
 
 class WriteRefusedError(PermissionError):

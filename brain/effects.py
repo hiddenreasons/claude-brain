@@ -58,6 +58,13 @@ class Recorder:
                 alert_log[key] = {"at": None}
             item["alert_key"] = key
             item["first_alerted_at"] = (alert_log.get(key) or {}).get("at")
+        for item in snapshot.get("mac_attention", []):
+            key = f"mac:{item['source']}:{item['id']}|{item['state']}|{item.get('at') or ''}"
+            if self.alerts.add(key, {"job": item["id"], "state": item["state"], "title": item["title"], "for": "MAC"}):
+                audit(
+                    self.files, "alert", item["id"], f"for MAC: {item['title']}: {item['detail']}"[:300], "Brain -> MAC"
+                )
+                counts["alerts"] += 1
         for job in jobs.values():
             if job.get("state") == "cleared" and job.get("followed_up_at"):
                 who = "git" if str(job.get("followed_up_by", "")).startswith("git") else "MAC"

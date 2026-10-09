@@ -16,6 +16,7 @@
     to_mac: "Claude reply",
     report: "Report written",
     job_result: "Job result",
+    codex: "Codex",
   };
 
   // Motion follows the system's Reduce Motion setting unless the viewer picked Full or Calm on the page.
@@ -505,6 +506,13 @@
           ctx.setLineDash([3, 3]); ctx.lineDashOffset = this.calm ? 0 : -t / 40; ctx.stroke(); ctx.setLineDash([]);
           ctx.beginPath(); ctx.arc(x, y, d + 4.5 * sc, 0, 7); ctx.strokeStyle = rgba(RED, 0.14 * fz); ctx.lineWidth = 3; ctx.stroke();
           if (!this.calm && fz > 0.3) { const u = (t % 1800) / 1800; ctx.beginPath(); ctx.arc(x, y, d + 6 + u * 16, 0, 7); ctx.strokeStyle = rgba(RED, 0.55 * (1 - u)); ctx.lineWidth = 1; ctx.stroke(); }
+        } else if (n.codex) {
+          // a Codex picture job: a small square in Codex green, a dot, and the running arc
+          const d = 4.4 * sc, cc = [16, 163, 127];
+          ctx.beginPath(); ctx.rect(x - d, y - d, d * 2, d * 2); ctx.fillStyle = rgba(cc, 0.25); ctx.fill();
+          ctx.strokeStyle = rgba([60, 220, 170], 1); ctx.lineWidth = 1.3; ctx.stroke();
+          dot(1.2 * sc, "rgba(255,255,255,.95)");
+          if (fz > 0.3) { const a0 = this.calm ? 0 : t / 500; ctx.beginPath(); ctx.arc(x, y, d + 3.5 * sc, a0, a0 + 1.3); ctx.strokeStyle = "rgba(120,240,200,.9)"; ctx.lineWidth = 1; ctx.stroke(); }
         } else if (act === "in_progress") {
           // working: thin ring, centre dot, a short arc running round it
           const rr = 4.2 * sc;

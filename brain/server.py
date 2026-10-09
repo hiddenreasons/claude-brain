@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlsplit
 
 from .brainfiles import BrainFiles
+from .codex import codex_messages
 from .comms import merge
 from .config import Config
 from .effects import Recorder, audit_tail, safe_record
@@ -84,7 +85,10 @@ class BrainState:
         # state taken from the heartbeat (machines.remote_jobs).
         remote_running = [j["id"] for j in snapshot["remote_jobs"] if j["state"] == "running"]
         snapshot["messages"] = stamp_and_sort(
-            mark_cleared(merge(derive_messages(snapshot), comms), snapshot["folders"]),
+            mark_cleared(
+                merge(derive_messages(snapshot), comms) + codex_messages(snapshot["codex"].pop("_events")),
+                snapshot["folders"],
+            ),
             self._first_seen,
             iso(time.time()),
             initial=self.version == 0,

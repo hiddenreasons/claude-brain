@@ -374,6 +374,14 @@ function activeRows() {
       open: () => revealOrder(e.id),
     });
   }
+  for (const c of (snap.codex && snap.codex.running) || []) {
+    rows.push({
+      id: `codex:${c.job}`, job: c.job, title: "Codex picture job", where: c.machine, machine: c.machine,
+      who: "Codex", doing: `making pictures${c.output_dir ? ` → ${c.output_dir}` : ""}`,
+      started: c.started_at, moved: c.started_at, source: "codex-status.jsonl",
+      open: () => document.getElementById("messages").scrollIntoView({ behavior: "smooth", block: "center" }),
+    });
+  }
   return rows.sort((a, b) => (b.moved || "").localeCompare(a.moved || ""));
 }
 
@@ -426,11 +434,18 @@ function renderAttention() {
   const base = document.body.classList.contains("demo-mode") ? "SAMPLE MODE · Claude Brain" : "Claude Brain";
   document.title = items.length ? `(${items.length}) ${base}` : base;
   const box = document.getElementById("attention");
+  const forMac = (snap.mac_attention || []).filter((a) => !ui.mine && matches(a.title, a.detail));
+  const macList = forMac.length ? el("div", { class: "for-mac" },
+    el("p", { class: "for-mac-h" }, `For MAC, not you (${forMac.length})`),
+    el("ul", { class: "bullets" }, forMac.map((a) => el("li", {},
+      el("span", { class: "badge fam-bad" }, "FAILED"), " ", el("b", {}, a.title), ` · ${a.detail}`,
+      a.at ? ` · ${relTime(a.at)}` : "", el("span", { class: "via" }, " → MAC")))),
+  ) : null;
   if (!items.length) {
     const older = [...allJobs(), ...snap.inbox].filter((i) => i.action === "needs_anthony").length;
     box.replaceChildren(empty(older
       ? `Nothing new in the last 3 days. ${older} older item${older === 1 ? "" : "s"} still marked ▲ NEEDS ANTHONY in the lists below.`
-      : "Nothing stuck. No blocked work orders, failed gates, stalled or errored jobs in the last 3 days."));
+      : "Nothing stuck. No blocked work orders, failed gates, stalled or errored jobs in the last 3 days."), macList || "");
     return;
   }
   box.replaceChildren(el("ol", { class: "list" }, items.map((a) => {
@@ -446,7 +461,7 @@ function renderAttention() {
       return window.askDrafts.draftForOrder(findOrder(a.id));
     };
     return el("li", {}, withAsk(card, ask(build)));
-  })));
+  })), macList || "");
 }
 
 function renderDecisions() {
@@ -569,7 +584,11 @@ function handleMessages(s) {
     return;
   }
   // Oldest first; volley.js keeps at most three bolts in flight and queues the rest.
-  fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m) => brains && brains.fire(m));
+  fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m) => {
+    if (!brains) return;
+    if (m.direction === "codex") brains.spark("mac", `codex:${m.ref.job}`); // Codex reports to MAC: a spark, not a bolt
+    else brains.fire(m);
+  });
 }
 
 function openMessage(m) {
@@ -596,6 +615,9 @@ let termPrimed = false;
 
 // What happened, as one small badge. Display only: read from fields the server already sends.
 function messageStatus(m) {
+  if (m.direction === "codex") {
+    return m.mac_kind === "failed" ? ["FAILED", "bad"] : m.mac_kind === "finished" ? ["DONE", "good"] : ["STARTED", "run"];
+  }
   if (m.blocked && !m.cleared) return ["BLOCKED", "bad"];
   if (m.cleared) return ["CLEARED", "good"];
   if (m.mac_kind === "job_started") return ["STARTED", "run"];
@@ -636,7 +658,7 @@ function renderTerminal() {
     const isNew = termPrimed && !termSeen.has(m.id);
     termSeen.add(m.id);
     const open = m.blocked && !m.cleared; // a blocked report MAC resolved since is history, not an alert
-    const [from, to] = m.direction === "to_claude" ? ["MAC", "CLAUDE"] : ["CLAUDE", "MAC"];
+    const [from, to] = m.direction === "codex" ? ["CODEX", "MAC"] : m.direction === "to_claude" ? ["MAC", "CLAUDE"] : ["CLAUDE", "MAC"];
     const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
     const [word, fam] = messageStatus(m);
     const onWindows = m.machine === "windows";
@@ -694,6 +716,9 @@ function renderStatus() {
       openDecisions().length ? "var(--mac)" : "var(--done)", "decisions-panel"),
     statTile("stuck", stuck, stuck ? snap.attention[0].title : "nothing blocked or failing", stuck ? "var(--accent)" : "var(--done)", "attention-panel"),
     statTile("msgs_24h", day.length, `${toClaude} MAC→Claude · ${day.length - toClaude} Claude→MAC`, "var(--claude)", "messages"),
+    statTile("codex_today", ((snap.codex || {}).today || {}).done || 0,
+      `${((snap.codex || {}).today || {}).pictures || 0} pictures · ${((snap.codex || {}).running || []).length} running`,
+      "#10a37f", "messages"),
     statTile("last_msg", last ? relTime(last.at).replace(" ago", "") : "—",
       last ? `${last.direction === "to_claude" ? "MAC→Claude" : "Claude→MAC"}: ${last.text}` : "none yet",
       last && last.blocked && !last.cleared ? "var(--accent)" : "var(--text)", "messages"),
@@ -852,6 +877,13 @@ function stationNodes() {
       kindLabel: "Waiting on Anthony", sub: clipText(text, 40), ref: { type: "decision", text: d },
     });
   });
+  for (const c of (snap.codex && snap.codex.running) || []) {
+    mac.push({
+      id: `codex:${c.job}`, key: `codex:${c.job}`, codex: true, label: `CODEX ${c.job.split("-")[0]}`, title: c.job,
+      action: "in_progress", kindLabel: `Codex picture job · ${c.machine}`, sub: `started ${relTime(c.started_at)}`,
+      ref: { type: "codex", job: c.job },
+    });
+  }
   return { claude, mac };
 }
 
