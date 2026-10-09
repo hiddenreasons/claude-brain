@@ -65,16 +65,17 @@
     <aside class="hud hud-right" id="hud-mac" aria-label="MAC's work orders"></aside>
   </section>
 
+  <section aria-labelledby="h-running" class="panel active-panel" id="running-panel">
+    <h2 id="h-running">Active now <span class="count" id="running-count"></span></h2>
+    <p class="source">What is being worked on right now: Claude's job folders and one-shots on this Mac, jobs MAC logged on other machines, and RUNNING work orders</p>
+    <div id="running"></div>
+  </section>
+
   <main class="layout">
     <div class="col">
       <section aria-labelledby="h-attention" class="panel" id="attention-panel">
         <h2 id="h-attention">Needs attention <span class="count" id="attention-count"></span></h2>
         <div id="attention"></div>
-      </section>
-
-      <section aria-labelledby="h-running" class="panel" id="running-panel">
-        <h2 id="h-running">Running now <span class="count" id="running-count"></span></h2>
-        <div id="running"></div>
       </section>
 
       <section aria-labelledby="h-jobs" class="panel">

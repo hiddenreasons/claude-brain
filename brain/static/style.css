@@ -164,11 +164,22 @@ strong { color: #fff; font-weight: 600; }
 .bolt-tip.to_claude { border-color: color-mix(in srgb, var(--mac) 60%, transparent); }
 .bolt-tip.to_mac { border-color: color-mix(in srgb, var(--claude) 60%, transparent); }
 .bolt-tip.blocked { border-color: var(--accent); }
-.preview-badge {
-  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 3;
-  font: 600 10px var(--mono); letter-spacing: 0.14em; color: #000; background: rgba(var(--wire-rgb), 0.85);
-  padding: 4px 8px; border-radius: 3px;
+/* Sample mode (?demo): impossible to mistake for live data. Amber, VADER's warning colour, not alert red. */
+body.demo-mode .hero { box-shadow: inset 0 0 0 2px #ffb547, 0 0 40px -12px rgba(255, 181, 71, 0.7), 0 22px 56px rgba(0, 0, 0, 0.38); }
+.demo-banner {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 5; padding: 9px 16px; text-align: center;
+  font: 600 12.5px/1.4 var(--ui); color: #1a1000;
+  background: repeating-linear-gradient(135deg, #ffb547 0 16px, #ffc56a 16px 32px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
 }
+.demo-banner strong { font: 800 12.5px/1 var(--mono); letter-spacing: 0.16em; margin-right: 8px; }
+.demo-banner a { color: #1a1000; font-weight: 700; text-decoration: underline; margin-left: 6px; }
+body.demo-mode .hero-readout { top: 52px; }
+.demo-flag {
+  padding: 5px 10px; border-radius: 6px; border: 1px solid #ffb547; background: rgba(255, 181, 71, 0.16); color: #ffb547;
+  font: 700 11px/1 var(--mono); letter-spacing: 0.12em; text-decoration: none; white-space: nowrap; animation: pulse 2.4s ease-in-out infinite;
+}
+.demo-flag:hover { background: rgba(255, 181, 71, 0.3); color: #fff; }
 
 /* ---------- node popup: VADER's node terminal window (Issues rev 7) ---------- */
 #brains-canvas { cursor: grab; touch-action: none; }
@@ -543,6 +554,25 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
   white-space: pre-wrap; overflow-wrap: anywhere; font: 11.5px/1.5 var(--mono); color: #cfdbe1;
   background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(var(--wire-rgb), 0.14); border-radius: 6px; padding: 10px; margin: 0; max-height: 50vh; overflow: auto;
 }
+
+/* ---------- Active now: one table of what is being worked on ---------- */
+.active-panel { margin: 14px 20px 0; }
+.active-wrap { overflow-x: auto; border: 1px solid rgba(var(--wire-rgb), 0.14); border-radius: 8px; background: rgba(0, 0, 0, 0.28); }
+.active-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.active-table th {
+  text-align: left; white-space: nowrap; padding: 8px 12px; border-bottom: 1px solid rgba(var(--wire-rgb), 0.25);
+  font: 600 9.5px/1.3 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: rgba(var(--wire-rgb), 0.85);
+}
+.active-table td { padding: 10px 12px; vertical-align: top; border-bottom: 1px solid rgba(var(--wire-rgb), 0.08); }
+.active-table tbody tr { cursor: pointer; transition: background-color 0.15s; }
+.active-table tbody tr:hover, .active-table tbody tr:focus-visible { background: rgba(255, 255, 255, 0.05); outline: none; }
+.active-table tbody tr.fresh { background: var(--fresh); }
+.active-table tbody tr:last-child td { border-bottom: 0; }
+.active-job b { display: block; font: 600 12.5px/1.3 var(--mono); color: #fff; }
+.active-job span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.35; min-width: 220px; }
+.active-doing { color: #dfeaee; min-width: 220px; }
+.active-num { white-space: nowrap; font: 12px/1.4 var(--mono); color: #cfdde4; }
+.active-table td:nth-child(3), .active-table td:nth-child(4) { white-space: nowrap; color: #cfe3ec; }
 
 /* ---------- readable reports in the job window ---------- */
 .rd {

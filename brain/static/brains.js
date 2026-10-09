@@ -393,8 +393,8 @@
       // name plate under the station
       const counts = { needs: 0, live: 0 };
       for (const n of st.nodes) { if (n.action === "needs_anthony") counts.needs++; if (n.action === "in_progress") counts.live++; }
-      // Stacked on a phone, Claude's plate goes above it so the link below stays clear.
-      const above = this.w < 640 && st.key === "claude";
+      // Stacked on a phone, the top station's plate (MAC's) goes above it so the link below stays clear.
+      const above = this.w < 640 && st.key === "mac";
       const ny = above ? Math.max(18, cy - R * 1.42 - 24) : Math.min(cy + R * 1.42 + 16, this.h - 26);
       ctx.textAlign = "center";
       ctx.font = `600 11px ${MONO}`; ctx.letterSpacing = "2.4px";

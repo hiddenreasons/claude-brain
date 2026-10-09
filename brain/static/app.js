@@ -304,41 +304,95 @@ function renderJobs() {
     `${total} jobs on record; the newest ${snap.oneshots.length + snap.folders.length} are here.`;
 }
 
-function renderRunning() {
-  const live = allJobs().filter((j) => j.state === "running" || j.state === "waiting");
-  const elsewhere = (snap.comms && snap.comms.running) || [];
-  document.getElementById("running-count").textContent = live.length + elsewhere.length || "";
-  const box = document.getElementById("running");
-  const elsewhereNote = elsewhere.length
-    ? el("p", { class: "line" }, "Running off this Mac, per MAC's log: ", elsewhere.join(", "))
-    : null;
-  if (!live.length && elsewhere.length) {
-    box.replaceChildren(elsewhereNote);
-    return;
+// Everything actually being worked on, as one table. A job MAC's log still calls running but whose folder
+// here has stopped is left out (MAC didn't log the finish).
+const MACHINES = { windows: "Windows", grok: "Grok Bot's computer", mac: "This Mac" };
+const localTime = (text) => { // "2026-10-09 16:12:48 EDT" from runs.log, in this Mac's time
+  const m = String(text || "").match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})/);
+  return m ? new Date(`${m[1]}T${m[2]}`).toISOString() : null;
+};
+const lastAction = (acts) => {
+  const a = (acts || [])[acts ? acts.length - 1 : 0];
+  return !a ? "" : a.kind === "tool" ? `${a.name}: ${a.summary || ""}` : a.text || "";
+};
+
+function activeRows() {
+  const rows = [];
+  const stopped = new Set();
+  for (const j of allJobs()) {
+    if (j.state !== "running" && j.state !== "waiting") { stopped.add(j.id); continue; }
+    const folder = j.kind === "folder";
+    rows.push({
+      id: jobKey(j), job: j.id, title: j.title || j.id, where: "This Mac",
+      who: folder ? `Claude · ${[j.model, j.effort].filter(Boolean).join(" ")}`.replace(/ · $/, "") : "Claude (one-shot)",
+      doing: folder ? lastAction(j.activity) || "starting" : "waiting for its result",
+      started: folder ? localTime(j.started) : j.sent_at, moved: folder ? j.stream_updated_at : j.sent_at,
+      open: () => openDetail(j.kind, j.id, j.title),
+    });
   }
-  if (!live.length) {
-    const latest = allJobs()[0];
+  const running = new Set((snap.comms && snap.comms.running) || []);
+  for (const name of running) {
+    if (stopped.has(name) || rows.some((r) => r.job === name)) continue;
+    const ms = (snap.messages || []).filter((m) => m.ref && m.ref.job === name && m.at); // newest first
+    const last = ms[0], start = ms.find((m) => m.mac_kind === "job_started") || ms[ms.length - 1];
+    const how = last && last.text.match(/\((opus|sonnet|haiku|fable)[^)]*\)/i);
+    rows.push({
+      id: `comms:${name}`, job: name, title: start ? plain(start.text) : name,
+      where: (last && MACHINES[last.machine]) || "Off this Mac",
+      who: how ? `Claude · ${how[0].slice(1, -1).toLowerCase()}` : "Claude",
+      // MAC logs a job's start and finish, not its steps: say so rather than repeat the job's description
+      doing: last && last !== start ? plain(last.text) : "Started; MAC has logged nothing since",
+      started: start && start.at, moved: last && last.at,
+      open: () => { const n = brains && brains.findNode(`mac:${name}`); if (n) { document.querySelector(".hero").scrollIntoView({ behavior: "smooth" }); openNodePopup(n); } },
+    });
+  }
+  for (const e of snap.inbox) {
+    if (e.state !== "RUNNING") continue;
+    rows.push({
+      id: `wo:${e.id}`, job: e.wo !== null ? window.Volley.woKey(e.wo) : "Work order", title: plain(e.title),
+      where: "—", who: e.action_who || "—", doing: plain(e.status_text || ""), started: null, moved: null,
+      open: () => revealOrder(e.id),
+    });
+  }
+  return rows.sort((a, b) => (b.moved || "").localeCompare(a.moved || ""));
+}
+
+const elapsed = (iso) => {
+  if (!iso) return "—";
+  const min = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  return min < 60 ? `${min} m` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} m`;
+};
+
+function renderRunning() {
+  const rows = activeRows().filter((r) => matches(r.job, r.title, r.doing));
+  document.getElementById("running-count").textContent = rows.length || "";
+  const box = document.getElementById("running");
+  if (!rows.length) {
+    const next = snap.inbox.find((e) => e.action === "queued");
     box.replaceChildren(
-      empty("No Claude job is running for MAC right now."),
-      latest ? el("p", { class: "line muted" }, "Last activity: ", latest.title || latest.id, " · ", relTime(latest.updated_at)) : null,
-      snap.status.running_note ? el("p", { class: "line muted" }, "MAC's STATUS.md: ", md(snap.status.running_note)) : null,
+      empty("Nothing is being worked on right now."),
+      next ? el("p", { class: "line muted" }, "Next in the queue: ", md(next.title), next.action_note ? ` (${next.action_note})` : "") : null,
     );
     return;
   }
-  box.replaceChildren(el("ol", { class: "list" }, live.map((job) =>
-    el("li", {},
-      el("button", {
-        type: "button", class: `card${isFresh(jobKey(job)) ? " fresh" : ""}`, "data-key": jobKey(job),
-        onclick: () => openDetail(job.kind, job.id, job.title),
-      },
-        el("div", { class: "card-top" }, badge(job.state), el("span", { class: "card-title" }, md(job.title || job.id))),
-        jobMeta(job),
-        job.stream_updated_at ? el("p", { class: "line muted" }, "Last action ", relTime(job.stream_updated_at)) : null,
-        job.kind === "folder" ? activityList(job.activity || [], 8) : el("p", { class: "line muted" }, job.prompt_preview || ""),
-      )
-    )
+  const head = ["Status", "Job", "Where", "Who", "Doing now", "Started", "Running for", "Log moved"];
+  box.replaceChildren(el("div", { class: "active-wrap" }, el("table", { class: "active-table" },
+    el("caption", { class: "visually-hidden" }, "Jobs being worked on right now"),
+    el("thead", {}, el("tr", {}, head.map((h) => el("th", { scope: "col" }, h)))),
+    el("tbody", {}, rows.map((r) => el("tr", {
+      tabindex: 0, class: isFresh(r.id) ? "fresh" : "", onclick: r.open,
+      onkeydown: (ev) => { if (ev.key === "Enter") r.open(); },
+    },
+      el("td", {}, el("span", { class: "act act-in_progress" }, "▶ IN PROGRESS")),
+      el("td", { class: "active-job" }, el("b", {}, r.job), el("span", {}, clipText(r.title, 90))),
+      el("td", {}, r.where),
+      el("td", {}, r.who),
+      el("td", { class: "active-doing" }, clipText(r.doing, 140)),
+      el("td", { class: "active-num" }, r.started ? clock(r.started) : "—"),
+      el("td", { class: "active-num" }, elapsed(r.started)),
+      el("td", { class: "active-num" }, r.moved ? relTime(r.moved) : "—"),
+    ))),
   )));
-  if (elsewhereNote) box.append(elsewhereNote);
 }
 
 // ---------- attention, decisions, orders, logs ----------
@@ -348,7 +402,8 @@ function renderAttention() {
   const panel = document.getElementById("attention-panel");
   panel.classList.toggle("has-items", items.length > 0);
   document.getElementById("attention-count").textContent = items.length || "";
-  document.title = items.length ? `(${items.length}) Claude Brain` : "Claude Brain";
+  const base = document.body.classList.contains("demo-mode") ? "SAMPLE MODE · Claude Brain" : "Claude Brain";
+  document.title = items.length ? `(${items.length}) ${base}` : base;
   const box = document.getElementById("attention");
   if (!items.length) {
     const older = [...allJobs(), ...snap.inbox].filter((i) => i.action === "needs_anthony").length;
@@ -599,11 +654,10 @@ function renderStatus() {
   const day = (snap.messages || []).filter((m) => m.at && Date.now() - Date.parse(m.at) < 86400000);
   const toClaude = day.filter((m) => m.direction === "to_claude").length;
   const last = (snap.messages || []).find((m) => m.at);
-  const runText = running.length
-    ? running.map((j) => j.id).join(", ")
-    : elsewhere.length ? `elsewhere: ${elsewhere.join(", ")}` : "nothing running";
+  const active = activeRows();
+  const runText = active.length ? active.map((r) => r.job).join(", ") : "nothing running";
   document.getElementById("statusbar").replaceChildren(
-    statTile("running", running.length + elsewhere.length, runText, "var(--running)", "running-panel"),
+    statTile("running", active.length, runText, "var(--running)", "running-panel"),
     statTile("needs_you", openDecisions().length,
       `${openDecisions().length} open · ${snap.status.decisions.length - openDecisions().length} settled in MAC's STATUS.md`,
       openDecisions().length ? "var(--mac)" : "var(--done)", "decisions-panel"),
@@ -625,20 +679,25 @@ const lastActionSig = new Map();
 let pulsesPrimed = false;
 
 function renderHero() {
-  const running = snap.folders.filter((j) => j.state === "running");
-  const job = running[0] || null;
-  const lastAction = job && job.activity && job.activity.length ? job.activity[job.activity.length - 1] : null;
+  // Both readouts use the same list as the Active now table, so they never disagree with it.
+  const active = activeRows();
+  const running = snap.folders.filter((j) => j.state === "running"); // their tool calls spark below
+  const here = active.filter((r) => r.where === "This Mac").length;
   const lastToClaude = (snap.messages || []).find((m) => m.at && m.direction === "to_claude");
   const macActive = lastToClaude && Date.now() - Date.parse(lastToClaude.at) < 30 * 60000;
+  const out = active.filter((r) => !r.id.startsWith("wo:")).length; // jobs MAC has out with Claude
   const open = snap.inbox.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state)).length;
+  const names = active.map((r) => r.job);
   document.getElementById("readout-claude").replaceChildren(
-    readoutLine("claude.state", job ? "RUNNING" : "IDLE", job ? "hot" : ""),
-    readoutLine("claude.job", job ? job.id : "—"),
-    readoutLine("claude.doing", lastAction ? (lastAction.kind === "tool" ? `${lastAction.name} · ${lastAction.summary || ""}` : lastAction.text) : "—"),
+    readoutLine("claude.state",
+      active.length ? `WORKING · ${active.length}${here === active.length ? "" : here ? ` (${active.length - here} off this Mac)` : " off this Mac"}` : "IDLE",
+      active.length ? "hot" : ""),
+    readoutLine("claude.job", names.length ? names.slice(0, 2).join(", ") + (names.length > 2 ? ` +${names.length - 2}` : "") : "—"),
+    readoutLine("claude.doing", active.length ? clipText(active[0].doing || "—", 60) : "—"),
     readoutLine("jobs.24h", String(allJobs().filter((j) => Date.now() - Date.parse(j.updated_at || 0) < 86400000).length)),
   );
   document.getElementById("readout-mac").replaceChildren(
-    readoutLine("mac.state", macActive ? "SENDING" : "QUIET", macActive ? "hot" : ""),
+    readoutLine("mac.state", macActive ? "SENDING" : out ? `WAITING · ${out} job${out === 1 ? "" : "s"} out` : "QUIET", macActive || out ? "hot" : ""),
     readoutLine("mac.last_sent", lastToClaude ? relTime(lastToClaude.at) : "—"),
     readoutLine("orders.open", String(open)),
     readoutLine("needs.anthony", String(openDecisions().length), openDecisions().length ? "bad" : "ok"),
@@ -860,29 +919,45 @@ function openNodePopup(node, refresh) {
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.openNode) closeNodePopup(); });
 
 function startDemo() {
-  // ?demo fires labeled sample volleys between real twin jobs so the look can be checked. Not real messages.
-  document.querySelector(".brains-stage").append(el("span", { class: "preview-badge" }, "PREVIEW · SAMPLE BOLTS, NOT REAL MESSAGES"));
-  brains.setRunning(1);
+  // ?demo shows the look with made-up bolts and sparks. They only ever fire from jobs that are really in
+  // progress right now, and nothing fires when none are, so it never shows activity that couldn't happen.
+  // Everything else on the page stays live.
+  document.body.classList.add("demo-mode");
+  document.title = "SAMPLE MODE · Claude Brain";
+  document.querySelector(".topbar").append(
+    el("a", { class: "demo-flag", href: "/", title: "Leave sample mode" }, "SAMPLE MODE · NOT LIVE · exit"),
+  );
+  document.querySelector(".brains-stage").append(el("div", { class: "demo-banner", role: "note" },
+    el("strong", {}, "SAMPLE MODE"),
+    " The bolts and sparks on the Death Stars are made up to show the look. The rest of the page is live. ",
+    el("a", { href: "/" }, "Exit sample mode"),
+  ));
+  const inProgress = () => {
+    const out = [];
+    for (const st of Object.values(brains.stations)) {
+      for (const n of st.nodes) if (n.key && n.action === "in_progress") out.push({ station: st.key, key: n.key });
+    }
+    return out;
+  };
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
   let i = 0;
   const shot = (key, direction, text) => brains.fire({ id: `demo-${i++}`, direction, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } });
-  const next = () => {
-    // twins facing the viewer on both stations, so the sample volley is easy to follow
-    const facing = (st) => new Set(st.nodes.filter((n) => n.key && n.action !== "done" && st.project(n.ll[0], n.ll[1])[2] > 0.2).map((n) => n.key));
-    const onMac = facing(brains.stations.mac);
-    const twins = [...facing(brains.stations.claude)].filter((k) => onMac.has(k));
-    if (!twins.length) return;
-    const key = twins[Math.floor(Math.random() * twins.length)];
-    shot(key, "to_claude", `Sample: MAC sends ${key}`);
-    setTimeout(() => shot(key, "to_mac", `Sample: Claude replies on ${key}`), 650);
-    setTimeout(() => shot(key, "to_claude", `Sample: MAC answers on ${key}`), 1300);
+  const volley = () => {
+    const live = inProgress();
+    if (!live.length) return; // nothing in progress: nothing fires
+    const { station, key } = pick(live);
+    // the volley starts from the station where the job is in progress, then the reply comes back
+    const out = station === "mac" ? "to_claude" : "to_mac", back = out === "to_claude" ? "to_mac" : "to_claude";
+    shot(key, out, `Sample (not real): message on ${key}`);
+    setTimeout(() => shot(key, back, `Sample (not real): reply on ${key}`), 650);
+    setTimeout(() => shot(key, out, `Sample (not real): answer on ${key}`), 1300);
   };
-  setTimeout(next, 1500);
-  setInterval(next, 3200);
-  // sample synapse sparks, as if a running job were making tool calls
+  setTimeout(volley, 1500);
+  setInterval(volley, 3200);
+  // sample sparks, as if an in-progress job were making tool calls
   setInterval(() => {
-    const st = brains.stations[Math.random() < 0.6 ? "claude" : "mac"];
-    const live = st.nodes.filter((n) => n.key && n.action !== "done" && st.project(n.ll[0], n.ll[1])[2] > 0.2);
-    if (live.length) brains.spark(st.key, live[Math.floor(Math.random() * live.length)].key);
+    const live = inProgress();
+    if (live.length) { const { station, key } = pick(live); brains.spark(station, key); }
   }, 650);
 }
 
