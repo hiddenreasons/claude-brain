@@ -1,0 +1,5 @@
+CLAUDE:
+Locked camera, fixed focus, square framing. Size, shape and position remain identical. Shards drift subtly clockwise; the arc glides slowly around the sphere; the core swirls gently. Glow softly brightens and dims three times over 10 seconds, with fine surface shimmer. Pure black background throughout. No lightning, flashes, flares, smoke, text, new objects or escaping sparks or particles. Motion stays slow and hypnotic. End exactly matching the first frame’s brightness and geometry for a seamless loop.
+
+MAC:
+Locked camera, fixed focus, square framing. Size, shape and position remain identical. Plates remain almost still; light slowly ripples along their edges. Cyan filaments pulse outward gently; specks drift subtly in place. Core glow softly brightens and dims three times over 10 seconds, with fine surface shimmer. Pure black background throughout. No lightning, flashes, flares, smoke, text, new objects or escaping sparks or particles. End exactly matching the first frame’s brightness and geometry for a seamless loop.

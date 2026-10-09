@@ -52,14 +52,16 @@ body {
   border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit;
 }
 
-/* Claude and MAC brains */
+/* Claude and MAC brains, with the HUD panels either side */
 .brains {
-  display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 0;
+  display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr) minmax(300px, 380px); gap: 0;
   margin: 16px 20px 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: #06070a;
 }
+.brains-center { display: flex; flex-direction: column; min-width: 0; }
 .brains-stage { position: relative; min-width: 0; }
-#brains-canvas { display: block; width: 100%; height: 260px; }
-.brains-feed { border-left: 1px solid var(--line); padding: 12px 14px; overflow: hidden; max-height: 260px; }
+#brains-canvas { display: block; width: 100%; height: 330px; }
+.brains-feed { border-top: 1px solid var(--line); padding: 10px 14px; overflow: hidden; }
+.brains-feed #messages { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 12px; }
 .brains-feed h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 #messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .msg-item {
@@ -86,10 +88,97 @@ body {
   font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--running);
   border: 1px solid currentColor; border-radius: 4px; padding: 1px 8px; background: rgba(0, 0, 0, 0.6);
 }
-@media (max-width: 1000px) {
+/* HUD: every shape here is drawn from real data (see hud.js) */
+.hud {
+  --hud: #ff9628;
+  position: relative; min-width: 0; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px;
+  font-family: var(--mono); font-size: 11px; color: #d8d4cf; overflow: hidden;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px) 0 0 / 100% 3px,
+    radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--hud) 10%, transparent), transparent 60%),
+    #07080b;
+}
+.hud-left { border-right: 1px solid color-mix(in srgb, var(--hud) 35%, var(--line)); }
+.hud-right { --hud: #50c8ff; border-left: 1px solid color-mix(in srgb, var(--hud) 35%, var(--line)); }
+.hud::before, .hud::after {
+  content: ""; position: absolute; width: 18px; height: 18px; border: 2px solid var(--hud); opacity: 0.7; pointer-events: none;
+}
+.hud::before { top: 4px; left: 4px; border-right: 0; border-bottom: 0; }
+.hud::after { bottom: 4px; right: 4px; border-left: 0; border-top: 0; }
+.hud-head { display: flex; align-items: center; gap: 8px; letter-spacing: 0.14em; }
+.hud-title { color: var(--hud); font-weight: 700; text-shadow: 0 0 8px color-mix(in srgb, var(--hud) 60%, transparent); }
+.hud-sub { margin-left: auto; color: var(--muted); letter-spacing: 0.06em; }
+.hud-blink { width: 7px; height: 7px; background: var(--hud); box-shadow: 0 0 8px var(--hud); animation: hud-blink 1.2s steps(2) infinite; }
+.hud-row { display: flex; gap: 8px; align-items: center; }
+.hud figure { margin: 0; }
+.hud figcaption { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); text-align: center; margin-top: 2px; }
+.hud-ring svg { width: 92px; height: 92px; display: block; }
+.hud-track { stroke: rgba(255, 255, 255, 0.06); }
+.hud-tick { stroke: color-mix(in srgb, var(--hud) 45%, transparent); stroke-width: 0.7; }
+.hud-dash { stroke: color-mix(in srgb, var(--hud) 50%, transparent); stroke-width: 0.8; stroke-dasharray: 2 4; }
+.hud-spin { transform-origin: 45px 45px; animation: hud-spin 14s linear infinite; }
+.hud-arc { filter: drop-shadow(0 0 3px currentColor); }
+.hud-big { fill: #fff; font-size: 17px; font-weight: 700; font-family: var(--mono); }
+.hud-small { fill: var(--muted); font-size: 7px; letter-spacing: 0.15em; font-family: var(--mono); }
+.hud-stats { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.hud-stat { border-left: 2px solid var(--c); padding: 2px 0 2px 8px; background: linear-gradient(90deg, color-mix(in srgb, var(--c) 12%, transparent), transparent); }
+.hud-stat-v { display: block; font-size: 18px; font-weight: 700; color: #fff; text-shadow: 0 0 10px var(--c); line-height: 1.1; }
+.hud-stat-l { display: block; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.hud-scroll { position: relative; overflow: auto; max-height: 230px; border: 1px solid color-mix(in srgb, var(--hud) 25%, var(--line)); }
+.hud-scroll::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 30px; pointer-events: none;
+  background: linear-gradient(transparent, color-mix(in srgb, var(--hud) 14%, transparent), transparent);
+  animation: hud-scan 4.5s linear infinite;
+}
+.hud-table { width: 100%; border-collapse: collapse; }
+.hud-table th {
+  position: sticky; top: 0; background: #0b0d11; color: var(--hud); text-align: left; font-weight: 700;
+  letter-spacing: 0.12em; font-size: 9px; padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, var(--hud) 40%, transparent);
+}
+.hud-table td { padding: 5px 6px; border-bottom: 1px dashed rgba(255, 255, 255, 0.06); vertical-align: top; }
+.hud-table tbody tr { cursor: pointer; }
+.hud-table tbody tr:hover, .hud-table tbody tr:focus-visible { background: color-mix(in srgb, var(--hud) 12%, transparent); outline: none; }
+.hud-mono { white-space: nowrap; color: #c9d1d9; }
+.hud-dim { color: var(--muted); }
+.hud-desc { font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; font-size: 11.5px; line-height: 1.35; color: #ece8e3;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.hud-status { display: block; color: var(--muted); font-size: 10.5px; margin-top: 2px; }
+.hud-glyph {
+  display: inline-block; min-width: 38px; text-align: center; font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+  color: var(--c); border: 1px solid var(--c); padding: 1px 3px; box-shadow: inset 0 0 6px color-mix(in srgb, var(--c) 35%, transparent);
+}
+.hud-hexes { width: 100%; display: block; }
+.hud-hex { opacity: 0.8; animation: hud-flicker 3.2s ease-in-out infinite; }
+.hud-hex.hot { animation-duration: 0.9s; }
+.hud-hex:hover { opacity: 1; stroke: #fff; stroke-width: 0.8; }
+.hud-radar svg { width: 150px; height: 150px; display: block; }
+.hud-radar-ring { fill: none; stroke: color-mix(in srgb, var(--hud) 30%, transparent); stroke-width: 0.6; }
+.hud-sweep { transform-origin: 64px 64px; animation: hud-spin 5s linear infinite; }
+.hud-sweep-fill { fill: color-mix(in srgb, var(--hud) 22%, transparent); }
+.hud-blip { cursor: pointer; outline: none; }
+.hud-blip:focus-visible circle:first-child, .hud-blip:hover circle:first-child { stroke: #fff; stroke-width: 1.2; }
+.hud-ping { stroke-width: 0.8; transform-box: fill-box; transform-origin: center; animation: hud-ping 2.4s ease-out infinite; }
+.hud-traffic svg { width: 100%; height: 64px; display: block; }
+.hud-axis { stroke: rgba(255, 255, 255, 0.25); stroke-width: 0.5; }
+.hud-bar-up { fill: #50c8ff; filter: drop-shadow(0 0 2px #50c8ff); }
+.hud-bar-down { fill: #ff9628; filter: drop-shadow(0 0 2px #ff9628); }
+@keyframes hud-blink { 50% { opacity: 0.15; } }
+@keyframes hud-spin { to { transform: rotate(360deg); } }
+@keyframes hud-scan { from { transform: translateY(-30px); } to { transform: translateY(260px); } }
+@keyframes hud-flicker { 0%, 100% { opacity: 0.85; } 45% { opacity: 0.55; } 50% { opacity: 1; } }
+@keyframes hud-ping { from { transform: scale(0.4); opacity: 0.9; } to { transform: scale(1.6); opacity: 0; } }
+
+@media (max-width: 1280px) {
+  .brains { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .brains-center { grid-column: 1 / -1; grid-row: 1; }
+  .hud-left { border-right: 1px solid var(--line); border-top: 1px solid var(--line); }
+  .hud-right { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 760px) {
   .brains { grid-template-columns: minmax(0, 1fr); margin: 12px 16px 0; }
-  .brains-feed { border-left: 0; border-top: 1px solid var(--line); max-height: none; }
-  #brains-canvas { height: 200px; }
+  .hud-left, .hud-right { border: 0; border-top: 1px solid var(--line); }
+  #brains-canvas { height: 220px; }
+  .hud-row { flex-wrap: wrap; justify-content: center; }
 }
 
 /* layout */
@@ -196,4 +285,5 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 
 @media (prefers-reduced-motion: reduce) {
   .card { transition: none; }
+  .hud *, .hud *::before, .hud *::after, .hud-scroll::after, .hud-blink { animation: none !important; }
 }

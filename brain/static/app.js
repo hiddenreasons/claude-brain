@@ -419,6 +419,7 @@ function startDemo() {
 
 function renderAll() {
   if (!snap) return;
+  if (window.renderHud) window.renderHud(snap);
   renderMessages();
   renderAttention();
   renderRunning();

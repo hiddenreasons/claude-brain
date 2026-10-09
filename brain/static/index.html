@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/style.css">
   <script src="/brains.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/hud.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -26,15 +27,19 @@
 
   <section class="brains" aria-labelledby="h-brains">
     <h2 id="h-brains" class="visually-hidden">Claude and MAC</h2>
-    <div class="brains-stage">
-      <canvas id="brains-canvas" role="img"
-        aria-label="Claude's brain in orange on the left, MAC's brain in blue on the right. Lightning between them shows each message as it happens."></canvas>
-      <div class="bolt-tip" id="bolt-tip" role="tooltip" hidden></div>
+    <aside class="hud hud-left" id="hud-claude" aria-label="Claude's jobs"></aside>
+    <div class="brains-center">
+      <div class="brains-stage">
+        <canvas id="brains-canvas" role="img"
+          aria-label="Claude's brain in orange on the left, MAC's brain in blue on the right. Lightning between them shows each message as it happens."></canvas>
+        <div class="bolt-tip" id="bolt-tip" role="tooltip" hidden></div>
+      </div>
+      <div class="brains-feed">
+        <h3>Latest messages</h3>
+        <ol id="messages" aria-live="polite"></ol>
+      </div>
     </div>
-    <div class="brains-feed">
-      <h3>Latest messages</h3>
-      <ol id="messages" aria-live="polite"></ol>
-    </div>
+    <aside class="hud hud-right" id="hud-mac" aria-label="MAC's work orders"></aside>
   </section>
 
   <main class="layout">

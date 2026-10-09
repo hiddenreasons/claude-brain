@@ -18,10 +18,9 @@
     report: "Report written",
     job_result: "Job result",
   };
-  const STRIKE1_END = 0.09;
-  const STRIKE2_AT = 0.15;
-  const STRIKE2_END = 0.26;
-  const DECAY_S = 1.4;
+  const BURST_S = 1.2; // the violent part: strobing, re-striking on new paths
+  const DECAY_S = 2.2;
+  const MAX_SPARKS = 700;
   const TRACE_S = 45;
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -324,38 +323,73 @@
       if (!haveVideo) onReady({ el: img, kind: "image" });
     };
     img.src = `/media/${who}-brain.png`;
-    const video = document.createElement("video");
-    video.muted = true;
-    video.loop = true;
-    video.playsInline = true;
-    video.preload = "auto";
-    video.addEventListener("canplay", () => {
+    // Two copies of the clip, so the end can crossfade into the start: no visible jump at the loop.
+    const make = () => {
+      const v = document.createElement("video");
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = "auto";
+      v.src = `/media/${who}-loop.mp4`;
+      return v;
+    };
+    const a = make();
+    const b = make();
+    a.addEventListener("canplay", () => {
       haveVideo = true;
-      video.play().catch(() => {});
-      onReady({ el: video, kind: "video" });
+      a.play().catch(() => {});
+      onReady({ kind: "video", a, b, active: a });
     }, { once: true });
-    video.src = `/media/${who}-loop.mp4`;
+  }
+
+  const CROSSFADE_S = 0.9;
+
+  // Runway clips come out widescreen with the brain centered; use the center square.
+  function blitFrame(ctx, el, x, y, size, alpha) {
+    if (alpha <= 0) return;
+    ctx.globalAlpha = alpha;
+    const w = el.videoWidth || el.naturalWidth || el.width;
+    const h = el.videoHeight || el.naturalHeight || el.height;
+    const side = Math.min(w, h);
+    ctx.drawImage(el, (w - side) / 2, (h - side) / 2, side, side, x - size / 2, y - size / 2, size, size);
   }
 
   function drawArt(ctx, art, x, y, r, t, flash) {
     // The brain fills about 70% of the artwork, so 3r makes it about as wide as the drawn brains.
-    const breathe = art.kind === "image" && !reduceMotion ? 1 + 0.012 * Math.sin(t * 1.3) : 1;
-    const size = r * 3 * breathe;
-    ctx.globalAlpha = art.kind === "image" && !reduceMotion ? 0.92 + 0.08 * Math.sin(t * 1.7) : 1;
-    ctx.drawImage(art.el, x - size / 2, y - size / 2, size, size);
-    if (flash > 0.01) {
-      ctx.globalAlpha = Math.min(1, flash * 0.7); // drawing it again adds light: the brain flares
-      ctx.drawImage(art.el, x - size / 2, y - size / 2, size, size);
+    if (art.kind === "image") {
+      const breathe = reduceMotion ? 1 : 1 + 0.012 * Math.sin(t * 1.3);
+      const size = r * 3 * breathe;
+      blitFrame(ctx, art.el, x, y, size, reduceMotion ? 1 : 0.92 + 0.08 * Math.sin(t * 1.7));
+      if (flash > 0.01) blitFrame(ctx, art.el, x, y, size, Math.min(1, flash * 0.7)); // adds light: a flare
+    } else {
+      const size = r * 3;
+      const v = art.active;
+      const other = v === art.a ? art.b : art.a;
+      const left = v.duration - v.currentTime;
+      let mix = 0;
+      if (Number.isFinite(left) && v.duration > CROSSFADE_S * 3 && left < CROSSFADE_S) {
+        if (other.paused) {
+          other.currentTime = 0;
+          other.play().catch(() => {});
+        }
+        mix = 1 - Math.max(0, left) / CROSSFADE_S;
+      }
+      if (v.readyState >= 2) blitFrame(ctx, v, x, y, size, 1 - mix);
+      if (mix > 0 && other.readyState >= 2) blitFrame(ctx, other, x, y, size, mix);
+      if (v.ended || (mix >= 1)) {
+        v.pause();
+        art.active = other;
+      }
+      if (flash > 0.01 && art.active.readyState >= 2) blitFrame(ctx, art.active, x, y, size, Math.min(1, flash * 0.7));
     }
     ctx.globalAlpha = 1;
   }
 
   // ---------- lightning ----------
 
-  function boltPath(ax, ay, bx, by, rand, rough) {
+  function boltPath(ax, ay, bx, by, rand, rough, depth = 6) {
     let pts = [[ax, ay], [bx, by]];
     let disp = Math.hypot(bx - ax, by - ay) * rough;
-    for (let depth = 0; depth < 6; depth++) {
+    for (let d = 0; d < depth; d++) {
       const next = [pts[0]];
       for (let i = 0; i < pts.length - 1; i++) {
         const [x1, y1] = pts[i];
@@ -390,12 +424,10 @@
     return best;
   }
 
-  // Brightness over a bolt's life: strike, a short dip, a second strike, then a fading trace.
+  // Brightness over a bolt's life: a strobing burst, a fade, then a faint trace you can still hover.
   function boltAlpha(age) {
-    if (age < STRIKE1_END) return 1;
-    if (age < STRIKE2_AT) return reduceMotion ? 1 : 0.25;
-    if (age < STRIKE2_END) return 1;
-    if (age < DECAY_S) return 1 - ((age - STRIKE2_END) / (DECAY_S - STRIKE2_END)) * 0.85;
+    if (age < BURST_S) return 1;
+    if (age < DECAY_S) return 1 - ((age - BURST_S) / (DECAY_S - BURST_S)) * 0.85;
     return Math.max(0, 0.15 * (1 - (age - DECAY_S) / (TRACE_S - DECAY_S)));
   }
 
@@ -407,6 +439,7 @@
       this.ctx = canvas.getContext("2d");
       this.bolts = [];
       this.waves = [];
+      this.sparks = [];
       this.running = 0;
       this.highlightId = null;
       this.hoverBolt = null;
@@ -453,11 +486,12 @@
     }
 
     fire(message) {
-      const bolt = { message, born: performance.now() / 1000, secondDone: false };
+      const born = performance.now() / 1000;
+      const bolt = { message, born, nextStrike: born + 0.06, strikes: 1 };
       bolt.strands = this.strands(bolt);
       this.bolts.push(bolt);
       if (this.bolts.length > 24) this.bolts.shift();
-      this.impact(bolt);
+      this.impact(bolt, true);
     }
 
     highlight(id) {
@@ -483,56 +517,128 @@
       return message.direction === "to_claude" ? PALETTE.mac : PALETTE.claude;
     }
 
-    impact(bolt) {
+    // Every strike: both brains flash, the receiver flares and throws sparks and embers.
+    impact(bolt, first) {
       const { to, sender, receiver } = this.ends(bolt.message);
       const colors = this.boltColors(bolt.message);
       this.flash[receiver] = 1;
       this.flash[sender] = Math.max(this.flash[sender], 0.6);
       this.flareColor[receiver] = colors;
       this.flareColor[sender] = colors;
-      this.waves.push({ x: to[0], y: to[1], born: performance.now() / 1000, colors });
-      if (!reduceMotion) this.screenFlash = { amount: bolt.message.blocked ? 0.3 : 0.18, color: colors.mid };
+      if (first || bolt.strikes % 3 === 0) this.waves.push({ x: to[0], y: to[1], born: performance.now() / 1000, colors });
+      if (reduceMotion) return;
+      this.screenFlash = { amount: Math.max(this.screenFlash.amount, first ? (bolt.message.blocked ? 0.3 : 0.2) : 0.07), color: colors.mid };
+      this.spawnSparks(to, colors, first ? 46 : 18);
     }
 
+    spawnSparks([x, y], colors, count) {
+      const now = performance.now() / 1000;
+      for (let i = 0; i < count; i++) {
+        const ember = this.rand() < 0.3;
+        const a = this.rand() * Math.PI * 2;
+        const speed = ember ? 20 + this.rand() * 50 : 90 + this.rand() * 260;
+        const from = this.r * (0.15 + this.rand() * 0.35);
+        this.sparks.push({
+          x: x + Math.cos(a) * from, y: y + Math.sin(a) * from,
+          vx: Math.cos(a) * speed, vy: Math.sin(a) * speed - (ember ? 15 : 0),
+          born: now, life: ember ? 1.2 + this.rand() * 0.9 : 0.35 + this.rand() * 0.6,
+          ember, color: this.rand() < 0.35 ? [255, 255, 255] : this.rand() < 0.5 ? colors.core : colors.mid,
+        });
+      }
+      if (this.sparks.length > MAX_SPARKS) this.sparks.splice(0, this.sparks.length - MAX_SPARKS);
+    }
+
+    drawSparks(ctx, now, dt) {
+      this.sparks = this.sparks.filter((p) => now - p.born < p.life);
+      for (const p of this.sparks) {
+        const k = 1 - (now - p.born) / p.life;
+        p.vy += (p.ember ? 18 : 160) * dt;
+        p.vx *= 1 - 1.5 * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        if (p.ember) {
+          ctx.fillStyle = rgba(p.color, 0.85 * k);
+          ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+        } else {
+          ctx.strokeStyle = rgba(p.color, k);
+          ctx.lineWidth = 1.3;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x - p.vx * 0.025, p.y - p.vy * 0.025);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // 5 to 8 primary bolts core to core, each with forks, sub-forks and fine hair-forks.
     strands(bolt) {
       const { from, to } = this.ends(bolt.message);
       const [sx, sy] = from;
       const [tx, ty] = to;
       const r = this.r;
+      const rand = this.rand;
       const out = [];
-      // A main channel and two side channels, from core to core.
-      for (let i = 0; i < 3; i++) {
-        const spread = (i === 0 ? 0 : i === 1 ? -1 : 1) * r * 0.3 + (this.rand() - 0.5) * r * 0.12;
-        out.push({ pts: boltPath(sx, sy + spread * 0.5, tx, ty + spread, this.rand, i === 0 ? 0.16 : 0.12), weight: i === 0 ? 1 : 0.6 });
+      const primaries = 5 + Math.floor(rand() * 4);
+      for (let i = 0; i < primaries; i++) {
+        const lane = primaries === 1 ? 0 : i / (primaries - 1) - 0.5;
+        const startY = sy + lane * r * 0.5 + (rand() - 0.5) * r * 0.2;
+        const endY = ty + lane * r * 0.7 + (rand() - 0.5) * r * 0.25;
+        const weight = i === Math.floor(primaries / 2) ? 1 : 0.5 + rand() * 0.4;
+        out.push({ pts: boltPath(sx, startY, tx, endY, rand, 0.13 + rand() * 0.07), weight });
       }
-      // Forks off the main channel, some with their own forks.
-      const forkFrom = (pts, count, scale, weight) => {
+      const heading = Math.atan2(ty - sy, tx - sx);
+      const fork = (pts, count, scale, weight, depth) => {
         for (let i = 0; i < count; i++) {
-          const at = pts[6 + Math.floor(this.rand() * (pts.length - 12))];
-          const len = r * scale * (0.5 + this.rand() * 0.9);
-          const ang = Math.atan2(ty - sy, tx - sx) + (this.rand() < 0.5 ? -1 : 1) * (0.35 + this.rand() * 0.9);
-          const fork = boltPath(at[0], at[1], at[0] + Math.cos(ang) * len, at[1] + Math.sin(ang) * len, this.rand, 0.3);
-          out.push({ pts: fork, weight });
-          if (weight > 0.3 && this.rand() < 0.6) forkFrom(fork, 1, scale * 0.5, weight * 0.55);
+          const at = pts[2 + Math.floor(rand() * (pts.length - 4))];
+          const len = r * scale * (0.4 + rand() * 0.9);
+          const ang = heading + (rand() < 0.5 ? -1 : 1) * (0.3 + rand() * 1.1);
+          const pts2 = boltPath(at[0], at[1], at[0] + Math.cos(ang) * len, at[1] + Math.sin(ang) * len, rand, 0.32, depth);
+          out.push({ pts: pts2, weight });
+          if (weight > 0.2 && rand() < 0.55) fork(pts2, 1 + Math.floor(rand() * 2), scale * 0.5, weight * 0.55, Math.max(3, depth - 1));
         }
       };
-      forkFrom(out[0].pts, 5, 1, 0.5);
+      for (let i = 0; i < primaries; i++) {
+        fork(out[i].pts, 4 + Math.floor(rand() * 4), 0.9, 0.42 * out[i].weight + 0.08, 4);
+        fork(out[i].pts, 10 + Math.floor(rand() * 8), 0.25, 0.14, 3); // fine hair-forks
+      }
       return out;
     }
 
+    // Glow in the direction's color, a white-hot core on the thick channels.
     drawBolt(ctx, bolt, alpha) {
       const c = this.boltColors(bolt.message);
       for (const { pts, weight } of bolt.strands) {
-        ctx.strokeStyle = rgba(c.edge, 0.18 * alpha * weight);
-        ctx.lineWidth = 18 * weight;
+        if (weight > 0.3) {
+          ctx.strokeStyle = rgba(c.edge, 0.16 * alpha * weight);
+          ctx.lineWidth = 22 * weight;
+          strokePath(ctx, pts);
+        }
+        ctx.strokeStyle = rgba(c.mid, 0.65 * alpha * Math.max(weight, 0.35));
+        ctx.lineWidth = Math.max(0.8, 7 * weight);
         strokePath(ctx, pts);
-        ctx.strokeStyle = rgba(c.mid, 0.6 * alpha * weight);
-        ctx.lineWidth = 6 * weight;
-        strokePath(ctx, pts);
-        ctx.strokeStyle = rgba(c.core, Math.min(1, 1.1 * alpha * weight));
-        ctx.lineWidth = Math.max(1, 2.6 * weight);
+        ctx.strokeStyle = rgba(weight >= 0.5 ? [255, 255, 255] : c.core, Math.min(1, 1.15 * alpha * Math.max(weight, 0.4)));
+        ctx.lineWidth = Math.max(0.6, 2.8 * weight);
         strokePath(ctx, pts);
       }
+    }
+
+    // The air between the brains lit by the strike.
+    drawHaze(ctx, bolt, amount) {
+      const c = this.boltColors(bolt.message);
+      const mx = (this.claudeAt[0] + this.macAt[0]) / 2;
+      const my = (this.claudeAt[1] + this.macAt[1]) / 2;
+      const rx = (this.macAt[0] - this.claudeAt[0]) * 0.65;
+      ctx.save();
+      ctx.translate(mx, my);
+      ctx.scale(1, 0.45);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+      g.addColorStop(0, rgba(c.mid, 0.16 * amount));
+      g.addColorStop(1, rgba(c.edge, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, rx, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
 
     drawWaves(ctx, now) {
@@ -624,17 +730,27 @@
       this.drawFlare(ctx, "mac", this.macAt);
       if (this.running > 0) this.drawRunningArc(ctx, now);
 
+      const dt = Math.min(0.05, now - (this.lastFrame || now));
+      this.lastFrame = now;
       for (const bolt of this.bolts) {
         const age = now - bolt.born;
-        if (!reduceMotion && !bolt.secondDone && age >= STRIKE2_AT) {
-          bolt.secondDone = true; // the second strike takes a fresh path, like real lightning
+        const bursting = age < BURST_S && !reduceMotion;
+        if (bursting && now >= bolt.nextStrike) {
+          // Re-strike on a fresh jagged path, at an erratic beat.
           bolt.strands = this.strands(bolt);
-          this.impact(bolt);
+          bolt.strikes += 1;
+          bolt.nextStrike = now + 0.055 + this.rand() * 0.055;
+          this.impact(bolt, false);
         }
         const lit = bolt === this.hoverBolt || bolt.message.id === this.highlightId;
-        const alpha = boltAlpha(age);
+        let alpha = boltAlpha(age);
+        if (bursting) {
+          alpha = 0.45 + 0.55 * this.rand(); // strobe, never fully dark
+          this.drawHaze(ctx, bolt, alpha);
+        }
         this.drawBolt(ctx, bolt, lit ? Math.max(alpha, 0.6) : alpha);
       }
+      this.drawSparks(ctx, now, dt);
       this.drawWaves(ctx, now);
 
       if (this.screenFlash.amount > 0.005) {
