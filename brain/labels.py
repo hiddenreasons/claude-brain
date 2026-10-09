@@ -65,16 +65,22 @@ def job_action(job: Dict[str, Any]) -> Dict[str, Any]:
     return label("done")  # done, cleared, followed_up
 
 
-def waiting_behind(entry: Dict[str, Any]) -> Optional[str]:
-    """What the inbox says this is waiting for: from its Status line, else its "Queue order:" line."""
+def _behind(text: str) -> Optional[str]:
+    """What a piece of inbox text says the item waits behind, if anything."""
+    for pattern in BEHIND_RES:
+        for match in pattern.finditer(text):
+            # "VV2 waits until this is done" is someone waiting on this item, not what it's behind.
+            if not SELF_RE.match(match.group(1)):
+                return clip(match.group(1).strip(" ,-—–)"), 90)
+    return None
+
+
+def _queue_behind(entry: Dict[str, Any]) -> Optional[str]:
+    """What the body's "Queue order:" line says it waits behind."""
     queue = QUEUE_ORDER_RE.search((entry.get("body") or "")[:800])
-    for text in (entry.get("status_text") or "", queue.group(1) if queue else ""):
-        for pattern in BEHIND_RES:
-            for match in pattern.finditer(text):
-                # "VV2 waits until this is done" is someone waiting on this item, not what it's behind.
-                if not SELF_RE.match(match.group(1)):
-                    return clip(match.group(1).strip(" ,-—–)"), 90)
-    return clip(queue.group(1).strip(), 90) if queue else None
+    if not queue:
+        return None
+    return _behind(queue.group(1)) or clip(queue.group(1).strip(), 90)
 
 
 def order_action(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -84,16 +90,27 @@ def order_action(entry: Dict[str, Any]) -> Dict[str, Any]:
         return label("needs_anthony", clip(last, 160))
     if state in ("DONE", "NOTE"):
         return label("done")
-    behind = waiting_behind(entry)
-    owner_text = f"{entry.get('title', '')} {entry.get('status_text') or ''}"
-    owner = OWNER_WAIT_RE.search(owner_text)
-    if behind and OWNER_FIRST_RE.search(behind):
-        return label("needs_anthony", f"waiting on Anthony: {behind}")
-    # Other owner wording counts unless the item is still queued behind other work first.
-    if owner and not (behind and state != "RUNNING"):
-        return label("needs_anthony", f"waiting on Anthony: {clip(owner.group(0), 60)}")
+    status = entry.get("status_text") or ""
+    status_behind = _behind(status)
+    queue_behind = _queue_behind(entry)
+    if status_behind and OWNER_FIRST_RE.search(status_behind):
+        # "until Anthony approves the list" with a queue place ahead of it is a sign-off at the end
+        # (WO #016), not what it waits for now. Without a queue place it is waiting on Anthony.
+        if not queue_behind:
+            return label("needs_anthony", f"waiting on Anthony: {status_behind}")
+        status_behind = None
+    behind = status_behind or queue_behind
+    queued_first = state != "RUNNING"
+    # The status line is the latest word: owner wording there counts unless the same line queues it
+    # behind other work. The title is fixed, so its owner wording only counts with no queue place.
+    status_owner = OWNER_WAIT_RE.search(status)
+    if status_owner and not (status_behind and queued_first):
+        return label("needs_anthony", f"waiting on Anthony: {clip(status_owner.group(0), 60)}")
+    title_owner = OWNER_WAIT_RE.search(entry.get("title") or "")
+    if title_owner and not (behind and queued_first):
+        return label("needs_anthony", f"waiting on Anthony: {clip(title_owner.group(0), 60)}")
     if state == "RUNNING":
-        who = WHO_RE.search(entry.get("status_text") or "")
+        who = WHO_RE.search(status)
         return label("in_progress", clip(entry.get("status_text"), 120), who.group(1) if who else None)
     return label(
         "queued", f"after {behind}" if behind and not behind.lower().startswith(("after", "until")) else behind

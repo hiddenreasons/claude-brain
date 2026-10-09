@@ -76,6 +76,20 @@ def test_work_order_waiting_on_an_owner_decision_needs_anthony(status):
     assert result["action"] == "needs_anthony" and result["action_note"].startswith("waiting on Anthony")
 
 
+def test_an_owner_sign_off_at_the_end_of_a_queued_order_is_not_a_wait_now():
+    # WO #016: queued after #014; Anthony approves the list only once the inventory exists.
+    status = "OPEN - Claude Eng (inventory) with MAC. Read only until Anthony approves the list."
+    body = "**From MAC.** Owner-approved 2026-10-05. Queue order: after #014 (#006 → #011 → #014 → **#016**).\n"
+    result = order_action(order("OPEN", status=status, body=body))
+    assert (result["action"], result["action_note"]) == ("queued", "after #014")
+
+
+def test_a_status_line_waiting_on_anthony_wins_over_an_old_queue_place():
+    body = "**From MAC.** Queue order: after #014.\n"
+    result = order_action(order("OPEN", status="OPEN - inventory written, waiting on Anthony's OK.", body=body))
+    assert result["action"] == "needs_anthony"
+
+
 def test_owner_wording_in_the_title_counts():
     assert order_action(order("OPEN", title="Short 22 re-render waits on two owner OKs"))["action"] == "needs_anthony"
 
