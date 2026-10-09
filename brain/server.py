@@ -71,8 +71,13 @@ class BrainState:
         self._known_ids: Dict[str, set] = {"oneshot": set(), "folder": set()}
         self._first_seen: Dict[str, Optional[str]] = {}
         self.stopping = threading.Event()
+        self._refresh_lock = threading.Lock()
 
     def refresh(self, force: bool = False) -> bool:
+        with self._refresh_lock:
+            return self._refresh(force)
+
+    def _refresh(self, force: bool) -> bool:
         fp = fingerprint(self.cfg)
         if not force and fp == self._fingerprint:
             return False
@@ -176,6 +181,12 @@ def make_handler(state: BrainState):
                     self._media(path.read_bytes(), content_type)
                 else:
                     self._error(HTTPStatus.NOT_FOUND, "not made yet")
+            elif url.path == "/api/refresh":
+                # The Update button: re-read every source now instead of waiting for the next poll.
+                state.refresh(force=True)
+                with state.cond:
+                    body = state.snapshot_bytes
+                self._send(HTTPStatus.OK, body, "application/json; charset=utf-8")
             elif url.path == "/api/snapshot":
                 with state.cond:
                     body = state.snapshot_bytes
@@ -278,10 +289,23 @@ def exporter_factory_for(cfg: Config):
     return lambda cache: VaultExporter(cfg.vault_dir, [cfg.vader_dir, cfg.runs_dir], cfg.runs_dir, cache)
 
 
+class QuietServer(ThreadingHTTPServer):
+    """A browser closing a video or reloading mid-response is normal; don't print a traceback for it."""
+
+    daemon_threads = True
+
+    def handle_error(self, request, client_address) -> None:  # noqa: ANN001
+        import sys
+
+        if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def serve(cfg: Config) -> None:
     state = BrainState(cfg, exporter_factory_for(cfg))
     state.refresh(force=True)
-    httpd = ThreadingHTTPServer((cfg.host, cfg.port), make_handler(state))
+    httpd = QuietServer((cfg.host, cfg.port), make_handler(state))
     httpd.daemon_threads = True
     watcher = threading.Thread(target=state.watch, name="brain-watch", daemon=True)
     watcher.start()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -12,7 +13,7 @@ from .comms import comms_path
 from .config import Config
 from .inbox import parse_inbox
 from .mac_runs import scan_flat_jobs, scan_job_folders
-from .readers import FileCache, iso, mtime_iso, read_text
+from .readers import FileCache, clip, iso, mtime_iso, read_text
 from .status_files import parse_issues, parse_status
 
 ONESHOT_LIMIT = 150  # newest one-shot jobs sent to the page; the total count is reported too
@@ -97,6 +98,36 @@ def build_attention(inbox: List[dict], folders: List[dict], oneshots: List[dict]
     return items
 
 
+STUCK_STATES = {"blocked", "no_report", "stalled", "gate_failed", "error"}
+RESOLVED_RE = re.compile(r"\b(committed|merged|pushed|done|approved|resolved|fixed|cleared|unblocked|closed)\b", re.I)
+STILL_OPEN_RE = re.compile(r"\b(blocked|awaiting|waiting on|pending|failed)\b", re.I)
+
+
+def apply_status_followups(folders: List[dict], entries: List[dict]) -> None:
+    """A stuck job is cleared when MAC's STATUS.md change log says so after the report.
+
+    MAC often fixes things outside the job folder (a commit or merge in the repo) and records it in
+    the change log. The newest entry naming the job, newer than its report, decides it.
+    """
+    for job in folders:
+        if job["state"] not in STUCK_STATES:
+            continue
+        since = job.get("report_at") or job.get("stream_updated_at") or ""
+        name = re.compile(rf"\b{re.escape(job['id'])}\b", re.I)
+        later = [e for e in entries if e["at"] and e["at"] > since and name.search(e["text"])]
+        if not later:
+            continue
+        newest = max(later, key=lambda e: e["at"])
+        text = newest["text"]
+        # Judge only the part about this job: from its name to the next sentence break.
+        start = name.search(text).start()
+        about = re.split(r"[.;]\s", text[start:], maxsplit=1)[0]
+        if RESOLVED_RE.search(about) and not STILL_OPEN_RE.search(about):
+            job["state"] = "followed_up"
+            job["followed_up_by"] = f"STATUS.md: {clip(text, 220)}"
+            job["followed_up_at"] = newest["at"]
+
+
 def _source(path: Any) -> Dict[str, Any]:
     return {"path": str(path), "exists": os.path.exists(path), "updated_at": mtime_iso(path)}
 
@@ -108,6 +139,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     oneshots = scan_flat_jobs(cfg.runs_dir, cache, now)
     status = cache.get(cfg.status_path, "status", lambda p: parse_status(read_text(p)))
     issues = cache.get(cfg.issues_path, "issues", lambda p: parse_issues(read_text(p)))
+    apply_status_followups(folders, status.get("entries", []))
     return {
         "generated_at": iso(now),
         "sources": {
@@ -123,6 +155,6 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         "oneshots": oneshots[:ONESHOT_LIMIT],
         "oneshot_total": len(oneshots),
         "inbox": inbox,
-        "status": status,
+        "status": {k: v for k, v in status.items() if k != "entries"},
         "issues": issues,
     }

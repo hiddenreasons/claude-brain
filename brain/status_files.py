@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .readers import clip
@@ -46,14 +47,33 @@ def _find(sections: Dict[str, List[str]], *needles: str) -> List[str]:
     return []
 
 
+# "2026-10-09 13:21 VADER c3: ..." or "2026-10-08 21:53 ET — ..." (MAC writes local Mac time)
+ENTRY_TIME_RE = re.compile(r"^(?P<day>\d{4}-\d{2}-\d{2})\s+(?P<time>\d{1,2}:\d{2})")
+
+
+def entry_time(text: str) -> Optional[str]:
+    """UTC ISO time of a change-log entry, from its leading local timestamp."""
+    match = ENTRY_TIME_RE.match(text)
+    if not match:
+        return None
+    try:
+        local = datetime.strptime(f"{match.group('day')} {match.group('time')}", "%Y-%m-%d %H:%M").astimezone()
+    except ValueError:
+        return None
+    return local.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
 def parse_status(text: Optional[str]) -> Dict[str, Any]:
     if not text:
-        return {"decisions": [], "changelog": [], "running_note": None}
+        return {"decisions": [], "changelog": [], "entries": [], "running_note": None}
     sections = _sections(text)
     running_lines = [ln for ln in _find(sections, "running") if ln.strip()]
+    log = _top_bullets(_find(sections, "change log"))
     return {
         "decisions": [clip(b, 600) for b in _top_bullets(_find(sections, "decision"))],
-        "changelog": [clip(b, 600) for b in _top_bullets(_find(sections, "change log"))][-15:][::-1],
+        "changelog": [clip(b, 600) for b in log][-15:][::-1],
+        # Every timed entry, for matching follow-ups to jobs (not sent to the page).
+        "entries": [{"at": entry_time(b), "text": b} for b in log if entry_time(b)],
         "running_note": clip(" ".join(running_lines[:2]).strip(), 500) or None,
     }
 

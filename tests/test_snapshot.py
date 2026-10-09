@@ -35,7 +35,7 @@ def test_status_decisions_fold_sub_bullets_and_changelog_is_newest_first(tree):
     ]
     assert status["changelog"][0].startswith("2026-10-09 10:44")
     assert status["running_note"] == "Nothing running."
-    assert parse_status(None) == {"decisions": [], "changelog": [], "running_note": None}
+    assert parse_status(None) == {"decisions": [], "changelog": [], "entries": [], "running_note": None}
 
 
 def test_issues_read_table_rows_and_headings_newest_first(tree):
@@ -104,3 +104,66 @@ def test_reading_everything_changes_nothing_on_disk(tree):
     job_detail(tree.runs_dir, "oneshot", "1")
     job_detail(tree.runs_dir, "folder", "job")
     assert tree_digest(tree.vader_dir, tree.runs_dir) == before
+
+
+def _stuck_job(tree, name, report_age_s):
+    job = tree.runs_dir / name
+    write(job / "brief.md", f"JOB: {name} task", age_s=report_age_s)
+    write(
+        job / "runs.log",
+        "start 2026-10-09 09:01:03 EDT iter 1 pid 1 prompt p model opus effort high\n",
+        age_s=report_age_s,
+    )
+    write(job / "iter-1.jsonl", "{}\n", age_s=report_age_s)
+    write(job / "iter-1.done", "", age_s=report_age_s)
+    write(job / "REPORT.md", "TO MAC: BLOCKED danger_guard, not committed\n", age_s=report_age_s)
+
+
+def _status_with(tree, *entries):
+    body = "# STATUS\n\n## 5. Open decisions awaiting Anthony\n\n- One.\n\n## 6. Change log\n\n"
+    write(tree.status_path, body + "".join(f"- {e}\n" for e in entries))
+
+
+def _local(minutes_ago):
+    from datetime import datetime, timedelta
+
+    return (datetime.now() - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M")
+
+
+def test_a_stuck_job_clears_when_macs_change_log_says_it_was_fixed(tree):
+    _stuck_job(tree, "claudemd", report_age_s=3600)
+    _status_with(
+        tree,
+        f"{_local(50)} VADER c3: claudemd iter 2 ended, TO MAC: BLOCKED danger_guard. Awaiting Anthony.",
+        f"{_local(10)} VADER c3: claudemd step 2 committed f1d2a32 (Anthony approved danger_guard).",
+    )
+    snap = build_snapshot(tree, FileCache())
+    job = next(j for j in snap["folders"] if j["id"] == "claudemd")
+    assert job["state"] == "followed_up" and job["followed_up_by"].startswith("STATUS.md: ")
+    assert not any(a.get("id") == "claudemd" for a in snap["attention"])
+    assert "entries" not in snap["status"]  # internal only
+
+
+def test_a_later_still_blocked_entry_keeps_it_stuck(tree):
+    _stuck_job(tree, "claudemd", report_age_s=3600)
+    _status_with(
+        tree,
+        f"{_local(40)} VADER c3: claudemd committed part 1.",
+        f"{_local(5)} VADER c3: claudemd still BLOCKED, awaiting Anthony --approve.",
+    )
+    job = next(j for j in build_snapshot(tree, FileCache())["folders"] if j["id"] == "claudemd")
+    assert job["state"] == "blocked"
+
+
+def test_change_log_entries_before_the_report_do_not_clear_it(tree):
+    _stuck_job(tree, "claudemd", report_age_s=600)
+    _status_with(tree, f"{_local(60)} VADER c3: claudemd step 1 committed abc.")
+    job = next(j for j in build_snapshot(tree, FileCache())["folders"] if j["id"] == "claudemd")
+    assert job["state"] == "blocked"
+
+
+def test_job_names_must_match_whole_words(tree):
+    _stuck_job(tree, "fix", report_age_s=3600)
+    _status_with(tree, f"{_local(5)} VADER c3: safetyfixes committed abc.")
+    job = next(j for j in build_snapshot(tree, FileCache())["folders"] if j["id"] == "fix")
+    assert job["state"] == "blocked"

@@ -629,17 +629,32 @@ function scheduleLoad() {
   loadTimer = setTimeout(load, 250);
 }
 
-async function load() {
+async function load(url = "/api/snapshot") {
   try {
-    const res = await fetch("/api/snapshot", { cache: "no-store" });
+    const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) throw new Error(res.statusText);
     snap = await res.json();
     trackChanges(snap);
     if (!demoMode) handleMessages(snap);
     renderAll();
+    return true;
   } catch (err) {
     document.getElementById("live-text").textContent = `Can't load data: ${err.message}`;
+    return false;
   }
+}
+
+// The Update button: the server re-reads every source right now, then the page redraws.
+async function updateNow() {
+  const btn = document.getElementById("update-btn");
+  if (btn.getAttribute("aria-busy") === "true") return;
+  btn.setAttribute("aria-busy", "true");
+  btn.textContent = "⟳ Checking…";
+  const ok = await load("/api/refresh");
+  const stamp = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  btn.textContent = ok ? `✓ Checked ${stamp}` : "✖ Couldn't check";
+  btn.removeAttribute("aria-busy");
+  setTimeout(() => { btn.textContent = "⟳ Update"; }, 4000);
 }
 
 function updateLiveText() {
@@ -668,6 +683,7 @@ function tick() {
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("search").addEventListener("input", (ev) => { ui.query = ev.target.value.trim(); renderAll(); });
+  document.getElementById("update-btn").addEventListener("click", updateNow);
   document.getElementById("detail-close").addEventListener("click", () => document.getElementById("detail").close());
   if (window.BrainsVisual) {
     const motion = window.BrainsVisual.motion;

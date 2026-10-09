@@ -168,3 +168,40 @@ def test_live_stream_announces_a_change_within_seconds(server):
     assert buf.count(b"event: update") >= 2
     _, body = get(port, "/api/snapshot")
     assert any(e["title"] == "Brand new work order" for e in json.loads(body)["inbox"])
+
+
+def test_update_button_endpoint_rechecks_immediately(tree):
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    cfg = dataclasses.replace(tree, port=port, poll_seconds=3600)  # the background poll won't run in time
+    state = BrainState(cfg)
+    state.refresh(force=True)
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(state))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        with open(cfg.inbox_path, "a", encoding="utf-8") as f:
+            f.write("\n## OPEN — 2026-10-10 · Added just now\n")
+        res, body = get(port, "/api/refresh")
+        assert res.status == 200
+        assert any(e["title"] == "Added just now" for e in json.loads(body)["inbox"])
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_quiet_server_swallows_client_disconnects(capsys):
+    import sys
+
+    from brain.server import QuietServer
+
+    class Probe(QuietServer):
+        def __init__(self):  # no socket needed to test error handling
+            pass
+
+    try:
+        raise BrokenPipeError()
+    except BrokenPipeError:
+        assert sys.exc_info()[0] is BrokenPipeError
+        Probe().handle_error(None, ("127.0.0.1", 1))
+    assert "Traceback" not in capsys.readouterr().err

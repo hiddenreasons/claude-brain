@@ -63,6 +63,12 @@ strong { color: #fff; }
   width: 100%; padding: 8px 12px; border-radius: var(--radius);
   border: 1px solid var(--line-2); background: var(--panel); color: var(--text); font: inherit;
 }
+.update-btn {
+  border: 1px solid color-mix(in srgb, var(--done) 55%, var(--line)); background: rgba(91, 211, 138, 0.08); color: var(--done);
+  border-radius: var(--radius); padding: 6px 12px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.update-btn:hover { background: rgba(91, 211, 138, 0.18); color: #fff; }
+.update-btn[aria-busy="true"] { opacity: 0.6; cursor: progress; }
 .motion-toggle {
   border: 1px solid var(--line-2); background: var(--panel); color: var(--muted); border-radius: var(--radius);
   padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
