@@ -320,6 +320,28 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
   background: #030407; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; margin: 0; max-height: 50vh; overflow: auto;
 }
 
+/* ---------- copy a fix request ---------- */
+.card-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; }
+.card-wrap > .card { align-self: stretch; }
+.ask-btn {
+  border: 1px solid color-mix(in srgb, var(--running) 45%, var(--line)); background: rgba(255, 209, 102, 0.06);
+  color: var(--running); border-radius: 2px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.ask-btn:hover, .ask-btn:focus-visible { background: rgba(255, 209, 102, 0.16); color: #fff; }
+.bullets .ask-btn, .foot .ask-btn { margin-left: 6px; vertical-align: 1px; }
+.ask-body { padding: 10px 16px 16px; }
+#ask-text {
+  width: 100%; min-height: 280px; resize: vertical; padding: 10px; border-radius: var(--radius);
+  border: 1px solid var(--line-2); background: #030407; color: var(--text); font: 12.5px/1.55 var(--mono);
+}
+.ask-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.ask-copy {
+  border: 1px solid var(--running); background: rgba(255, 209, 102, 0.12); color: #fff; border-radius: var(--radius);
+  padding: 7px 14px; font: inherit; font-weight: 700; cursor: pointer;
+}
+.ask-copy:hover { background: rgba(255, 209, 102, 0.25); }
+#ask-status { color: var(--done); font-size: 12px; }
+
 /* ---------- motion ---------- */
 @keyframes blink { 50% { opacity: 0.1; } }
 @keyframes spin { to { transform: rotate(360deg); } }

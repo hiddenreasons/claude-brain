@@ -8,6 +8,7 @@
   <script src="/brains.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/hud.js" defer></script>
+  <script src="/ask.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -105,6 +106,22 @@
   </main>
 
   <footer class="foot" id="sources"></footer>
+
+  <dialog id="ask" aria-labelledby="ask-title">
+    <div class="dialog-head">
+      <h2 id="ask-title">Copy a message</h2>
+      <button type="button" class="close" id="ask-close" aria-label="Close">Close</button>
+    </div>
+    <div class="ask-body">
+      <p class="source" id="ask-where"></p>
+      <label for="ask-text" class="visually-hidden">Message</label>
+      <textarea id="ask-text" rows="14" spellcheck="false"></textarea>
+      <div class="ask-actions">
+        <button type="button" class="ask-copy" id="ask-copy">⧉ Copy to clipboard</button>
+        <span id="ask-status" role="status" aria-live="polite"></span>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="detail" aria-labelledby="detail-title">
     <div class="dialog-head">

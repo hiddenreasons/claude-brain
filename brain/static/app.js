@@ -148,17 +148,34 @@ function jobLine(job) {
   return null;
 }
 
+// ---------- copy-a-fix-request buttons (ask.js) ----------
+
+const ISSUE_STATES = new Set(["blocked", "error", "gate_failed", "stalled", "no_report", "followed_up", "no_result"]);
+const findJob = (kind, id) => (kind === "folder" ? snap.folders : snap.oneshots).find((j) => j.id === id);
+const findOrder = (id) => snap.inbox.find((e) => e.id === id);
+
+function ask(build, label) {
+  return window.askButton ? window.askButton(build, label) : null;
+}
+
+// A card plus, under it, its copy button. Buttons can't sit inside the card (itself a button).
+function withAsk(card, askBtn) {
+  return askBtn ? el("div", { class: "card-wrap" }, card, askBtn) : card;
+}
+
 function jobCard(job) {
-  return el("li", {},
-    el("button", {
-      type: "button", class: `card${isFresh(jobKey(job)) ? " fresh" : ""}`, "data-key": jobKey(job),
-      onclick: () => openDetail(job.kind, job.id, job.title),
-    },
-      el("div", { class: "card-top" }, badge(job.state), el("span", { class: "card-title" }, md(job.title || job.id))),
-      jobMeta(job),
-      jobLine(job),
-    )
+  const card = el("button", {
+    type: "button", class: `card${isFresh(jobKey(job)) ? " fresh" : ""}`, "data-key": jobKey(job),
+    onclick: () => openDetail(job.kind, job.id, job.title),
+  },
+    el("div", { class: "card-top" }, badge(job.state), el("span", { class: "card-title" }, md(job.title || job.id))),
+    jobMeta(job),
+    jobLine(job),
   );
+  const askBtn = ISSUE_STATES.has(job.state)
+    ? ask(() => window.askDrafts.draftForJob(findJob(job.kind, job.id) || job))
+    : null;
+  return el("li", {}, withAsk(card, askBtn));
 }
 
 function activityList(actions, limit) {
@@ -244,24 +261,30 @@ function renderAttention() {
     box.replaceChildren(empty("Nothing stuck. No blocked work orders, failed gates, stalled or errored jobs in the last 3 days."));
     return;
   }
-  box.replaceChildren(el("ol", { class: "list" }, items.map((a) =>
-    el("li", {},
-      el("button", {
-        type: "button", class: "card",
-        onclick: () => (a.source === "job" ? openDetail(a.kind, a.id, a.title) : revealOrder(a.id)),
-      },
-        el("div", { class: "card-top" }, badge(a.state), el("span", { class: "card-title" }, md(a.title))),
-        a.detail ? el("p", { class: "line" }, md(a.detail)) : null,
-      )
-    )
-  )));
+  box.replaceChildren(el("ol", { class: "list" }, items.map((a) => {
+    const card = el("button", {
+      type: "button", class: "card",
+      onclick: () => (a.source === "job" ? openDetail(a.kind, a.id, a.title) : revealOrder(a.id)),
+    },
+      el("div", { class: "card-top" }, badge(a.state), el("span", { class: "card-title" }, md(a.title))),
+      a.detail ? el("p", { class: "line" }, md(a.detail)) : null,
+    );
+    const build = () => {
+      if (a.source === "job") return window.askDrafts.draftForJob(findJob(a.kind, a.id) || { ...a, kind: a.kind, activity: [] });
+      return window.askDrafts.draftForOrder(findOrder(a.id));
+    };
+    return el("li", {}, withAsk(card, ask(build)));
+  })));
 }
 
 function renderDecisions() {
   const items = snap.status.decisions.filter((d) => matches(d));
   document.getElementById("decisions-count").textContent = items.length || "";
   const list = document.getElementById("decisions");
-  list.replaceChildren(...(items.length ? items.map((d) => el("li", {}, md(d))) : [el("li", { class: "empty" }, "Nothing listed.")]));
+  list.replaceChildren(...(items.length
+    ? items.map((d) => el("li", {}, md(d), " ",
+      /^~~.*~~\s*DONE/i.test(d) ? null : ask(() => window.askDrafts.draftForDecision(d), "Copy my decision")))
+    : [el("li", { class: "empty" }, "Nothing listed.")]));
 }
 
 function orderPassesFilter(entry) {
@@ -299,7 +322,10 @@ function orderCard(entry) {
   if (entry.body) {
     details.append(el("div", { class: "body" }, md(entry.body), entry.body_truncated ? "\n\n(cut short; see CLAUDE INBOX.md)" : ""));
   }
-  return el("li", {}, details);
+  const askBtn = ["DONE", "NOTE"].includes(entry.state)
+    ? null
+    : ask(() => window.askDrafts.draftForOrder(findOrder(entry.id) || entry));
+  return el("li", {}, withAsk(details, askBtn));
 }
 
 function renderOrders() {
@@ -330,7 +356,8 @@ function renderLogs() {
   const incidents = snap.issues.filter((i) => matches(i.what, i.job));
   document.getElementById("incidents").replaceChildren(
     ...(incidents.length
-      ? incidents.map((i) => el("li", {}, `${i.date}${i.job ? ` · ${i.job}` : ""}: `, md(i.what)))
+      ? incidents.map((i) => el("li", {}, `${i.date}${i.job ? ` · ${i.job}` : ""}: `, md(i.what), " ",
+        ask(() => window.askDrafts.draftForIncident(i), "Ask MAC")))
       : [el("li", { class: "empty" }, "No incidents logged.")])
   );
   document.getElementById("sources").replaceChildren(
@@ -340,7 +367,8 @@ function renderLogs() {
       `${name} `,
       src.exists
         ? el("span", {}, "(", relTime(src.updated_at) || "ok", ")")
-        : src.optional ? el("span", {}, "(not started yet)") : el("strong", {}, "(missing)"),
+        : src.optional ? el("span", {}, "(not started yet)")
+          : el("strong", {}, "(missing) ", ask(() => window.askDrafts.draftForBrain(name, src), "Ask Claude")),
     ]),
     `. Nothing here can change those files.`
   );
@@ -586,6 +614,8 @@ async function openDetail(kind, id, title) {
         ...section("Run log", d.runs_log),
       );
     }
+    const job = findJob(kind, id);
+    if (job) body.prepend(el("p", { class: "line" }, ask(() => window.askDrafts.draftForJob(findJob(kind, id) || job), "Copy a message to MAC about this job")));
   } catch (err) {
     body.replaceChildren(empty(`Couldn't load this job: ${err.message}`));
   }
