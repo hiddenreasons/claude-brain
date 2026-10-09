@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Brain</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Claude Brain</h1>
+      <p class="sub">MAC and Claude, live. Read-only.</p>
+    </div>
+    <div class="live" role="status" aria-live="polite">
+      <span class="dot" id="live-dot" aria-hidden="true"></span>
+      <span id="live-text">Connecting…</span>
+    </div>
+    <label class="search">
+      <span class="visually-hidden">Search jobs and work orders</span>
+      <input id="search" type="search" placeholder="Search jobs and work orders" autocomplete="off">
+    </label>
+  </header>
+
+  <main class="layout">
+    <div class="col">
+      <section aria-labelledby="h-attention" class="panel" id="attention-panel">
+        <h2 id="h-attention">Needs attention <span class="count" id="attention-count"></span></h2>
+        <div id="attention"></div>
+      </section>
+
+      <section aria-labelledby="h-running" class="panel">
+        <h2 id="h-running">Running now <span class="count" id="running-count"></span></h2>
+        <div id="running"></div>
+      </section>
+
+      <section aria-labelledby="h-jobs" class="panel">
+        <div class="panel-head">
+          <h2 id="h-jobs">MAC → Claude jobs <span class="count" id="jobs-count"></span></h2>
+          <div class="chips" role="group" aria-label="Filter jobs" id="job-filters"></div>
+        </div>
+        <p class="source" id="jobs-note">From ~/.vader-mac-runs</p>
+        <ol class="list" id="jobs"></ol>
+      </section>
+    </div>
+
+    <div class="col">
+      <section aria-labelledby="h-decisions" class="panel">
+        <h2 id="h-decisions">Waiting on Anthony <span class="count" id="decisions-count"></span></h2>
+        <p class="source">From MAC's STATUS.md</p>
+        <ul class="bullets" id="decisions"></ul>
+      </section>
+
+      <section aria-labelledby="h-orders" class="panel">
+        <div class="panel-head">
+          <h2 id="h-orders">Work orders</h2>
+          <div class="chips" role="group" aria-label="Filter work orders" id="order-filters"></div>
+        </div>
+        <p class="source">From VADER's CLAUDE INBOX.md</p>
+        <ol class="list" id="orders"></ol>
+      </section>
+
+      <section aria-labelledby="h-changelog" class="panel">
+        <h2 id="h-changelog">MAC change log</h2>
+        <ul class="bullets" id="changelog"></ul>
+      </section>
+
+      <section aria-labelledby="h-incidents" class="panel">
+        <h2 id="h-incidents">Incidents</h2>
+        <p class="source">From MAC's ISSUES-LOG.md</p>
+        <ul class="bullets" id="incidents"></ul>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot" id="sources"></footer>
+
+  <dialog id="detail" aria-labelledby="detail-title">
+    <div class="dialog-head">
+      <h2 id="detail-title">Job</h2>
+      <button type="button" class="close" id="detail-close" aria-label="Close">Close</button>
+    </div>
+    <div id="detail-body"></div>
+  </dialog>
+</body>
+</html>

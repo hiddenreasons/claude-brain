@@ -1,0 +1,22 @@
+[project]
+name = "claude-brain"
+version = "0.1.0"
+description = "Live, read-only view of MAC (Grok Bot) and Claude work on VADER"
+requires-python = ">=3.9"
+dependencies = []  # standard library only
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N"]
+ignore = ["UP006", "UP007", "UP035", "UP045"]  # keep typing.Dict/Optional for Python 3.9 (the Mac's system python3)
+
+[tool.ruff.lint.isort]
+known-first-party = ["brain"]
+known-local-folder = ["conftest"]
