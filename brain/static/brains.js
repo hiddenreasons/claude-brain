@@ -465,6 +465,11 @@
       this.bolts = [];
       this.waves = [];
       this.sparks = [];
+      this.packets = [];
+      this.pulses = [];
+      this.orbits = { claude: [], mac: [] };
+      this.traffic = { toClaude: 0, toMac: 0 };
+      this.packetDebt = { toClaude: 0, toMac: 0 };
       this.running = 0;
       this.highlightId = null;
       this.hoverBolt = null;
@@ -496,15 +501,34 @@
       this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       this.w = w;
       this.h = h;
-      this.r = Math.max(30, Math.min(h * 0.36, w * 0.13));
-      this.claudeAt = [Math.max(this.r * 1.45, w * 0.17), h * 0.5];
-      this.macAt = [Math.min(w - this.r * 1.45, w * 0.83), h * 0.5];
+      // Big brains: each fills most of its half, with room in the middle for the lightning.
+      this.r = Math.max(34, Math.min(h * 0.33, w * (w < 760 ? 0.14 : 0.12)));
+      this.claudeAt = [w * 0.25, h * 0.52];
+      this.macAt = [w * 0.75, h * 0.52];
       this.claudeArt = buildClaude(this.r, dpr);
       this.macArt = buildMac(this.r, dpr);
       for (const bolt of this.bolts) bolt.strands = this.strands(bolt);
     }
 
     // ----- what the page calls -----
+
+    // Labels that orbit each brain: [{text, color}].
+    setOrbits(orbits) {
+      this.orbits = { claude: orbits.claude || [], mac: orbits.mac || [] };
+    }
+
+    // Messages in the last hour, by direction. Packets flow along the channel in proportion.
+    setTraffic(traffic) {
+      this.traffic = { toClaude: traffic.toClaude || 0, toMac: traffic.toMac || 0 };
+    }
+
+    // A tool call in a running job: a ring pulse on Claude's brain with the tool's name.
+    pulse(name) {
+      const now = performance.now() / 1000;
+      this.pulses.push({ name, born: now, angle: -Math.PI / 2 + (this.rand() - 0.5) * 2.4 });
+      if (this.pulses.length > 12) this.pulses.shift();
+      this.flash.claude = Math.max(this.flash.claude, 0.35);
+    }
 
     setRunning(count) {
       this.running = count;
@@ -710,28 +734,155 @@
     }
 
     drawBackground(ctx) {
-      ctx.fillStyle = "#06070a";
+      ctx.fillStyle = "#020306";
       ctx.fillRect(0, 0, this.w, this.h);
       const glowAt = (x, y, color) => {
-        const g = ctx.createRadialGradient(x, y, 0, x, y, this.r * 3);
-        g.addColorStop(0, rgba(color, 0.12));
+        const g = ctx.createRadialGradient(x, y, 0, x, y, this.r * 3.2);
+        g.addColorStop(0, rgba(color, 0.14));
         g.addColorStop(1, rgba(color, 0));
         ctx.fillStyle = g;
         ctx.fillRect(0, 0, this.w, this.h);
       };
       glowAt(...this.claudeAt, PALETTE.claude.edge);
       glowAt(...this.macAt, PALETTE.mac.edge);
-      ctx.fillStyle = "rgba(255,255,255,0.025)";
+      // A faint engineering grid, with crosshairs through each brain.
+      ctx.strokeStyle = "rgba(80,200,255,0.05)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 0.5; x < this.w; x += 32) { ctx.moveTo(x, 0); ctx.lineTo(x, this.h); }
+      for (let y = 0.5; y < this.h; y += 32) { ctx.moveTo(0, y); ctx.lineTo(this.w, y); }
+      ctx.stroke();
+      for (const [[x, y], c] of [[this.claudeAt, PALETTE.claude.mid], [this.macAt, PALETTE.mac.mid]]) {
+        ctx.strokeStyle = rgba(c, 0.12);
+        ctx.setLineDash([2, 6]);
+        ctx.beginPath();
+        ctx.moveTo(x - this.r * 1.9, y); ctx.lineTo(x + this.r * 1.9, y);
+        ctx.moveTo(x, y - this.r * 1.6); ctx.lineTo(x, y + this.r * 1.6);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = rgba(c, 0.22);
+        ctx.beginPath();
+        ctx.arc(x, y, this.r * 1.52, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(255,255,255,0.02)";
       for (let y = 0; y < this.h; y += 3) ctx.fillRect(0, y, this.w, 1);
     }
 
-    drawLabels(ctx) {
-      ctx.font = "600 11px -apple-system, BlinkMacSystemFont, system-ui, sans-serif";
+    // The channel between the brains: two faint lanes, and packets riding them (real traffic).
+    channelPoint(dir, lane, k) {
+      const toClaude = dir === "to_claude";
+      const [sx, sy] = toClaude ? this.macAt : this.claudeAt;
+      const [tx, ty] = toClaude ? this.claudeAt : this.macAt;
+      const x0 = sx + (toClaude ? -1 : 1) * this.r * 1.1;
+      const x1 = tx + (toClaude ? 1 : -1) * this.r * 1.1;
+      const bend = (toClaude ? 1 : -1) * this.r * 0.42 + lane;
+      const cx = (x0 + x1) / 2;
+      const cy = (sy + ty) / 2 + bend;
+      const u = 1 - k;
+      return [u * u * x0 + 2 * u * k * cx + k * k * x1, u * u * sy + 2 * u * k * cy + k * k * ty];
+    }
+
+    drawChannel(ctx, now, dt) {
+      ctx.setLineDash([3, 7]);
+      for (const dir of ["to_claude", "to_mac"]) {
+        const c = dir === "to_claude" ? PALETTE.mac : PALETTE.claude;
+        ctx.strokeStyle = rgba(c.mid, 0.16);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i <= 24; i++) {
+          const [x, y] = this.channelPoint(dir, 0, i / 24);
+          if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      if (!reduceMotion) {
+        for (const [key, dir] of [["toClaude", "to_claude"], ["toMac", "to_mac"]]) {
+          // 1 message in the last hour -> a packet every ~12 s; 10 -> about one a second.
+          const rate = Math.min(3, this.traffic[key] * 0.085);
+          this.packetDebt[key] += rate * dt;
+          while (this.packetDebt[key] >= 1) {
+            this.packetDebt[key] -= 1;
+            this.packets.push({ dir, born: now, dur: 1.4 + this.rand() * 0.9, lane: (this.rand() - 0.5) * this.r * 0.35 });
+          }
+        }
+      }
+      this.packets = this.packets.filter((p) => now - p.born < p.dur);
+      for (const p of this.packets) {
+        const k = (now - p.born) / p.dur;
+        const c = p.dir === "to_claude" ? PALETTE.mac : PALETTE.claude;
+        for (let i = 0; i < 6; i++) {
+          const kk = Math.max(0, k - i * 0.018);
+          const [x, y] = this.channelPoint(p.dir, p.lane * Math.sin(Math.PI * kk), kk);
+          ctx.fillStyle = rgba(i === 0 ? [255, 255, 255] : c.mid, (i === 0 ? 0.95 : 0.5) * (1 - i / 6));
+          const sz = i === 0 ? 2.6 : 2;
+          ctx.fillRect(x - sz / 2, y - sz / 2, sz, sz);
+        }
+      }
+    }
+
+    drawPulses(ctx, now) {
+      this.pulses = this.pulses.filter((p) => now - p.born < 1.8);
+      const [x, y] = this.claudeAt;
+      for (const p of this.pulses) {
+        const k = (now - p.born) / 1.8;
+        ctx.strokeStyle = rgba(PALETTE.claude.core, 0.7 * (1 - k));
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, this.r * (1.05 + k * 0.7), 0, Math.PI * 2);
+        ctx.stroke();
+        const d = this.r * (1.2 + k * 0.5);
+        ctx.fillStyle = rgba([255, 209, 102], 1 - k);
+        ctx.font = `700 ${Math.round(Math.max(11, this.r * 0.08))}px ui-monospace, Menlo, monospace`;
+        ctx.textAlign = "center";
+        ctx.fillText(`▸ ${p.name}`, x + Math.cos(p.angle) * d, y + Math.sin(p.angle) * d);
+      }
+    }
+
+    // Labels riding a ring around a brain, readable on both halves of the circle.
+    drawOrbit(ctx, at, items, t, spinDir) {
+      if (!items.length) return;
+      const [cx, cy] = at;
+      const R = this.r * 1.32;
+      const size = Math.round(Math.max(9, Math.min(12, this.r * 0.065)));
+      ctx.font = `600 ${size}px ui-monospace, Menlo, monospace`;
       ctx.textAlign = "center";
-      ctx.fillStyle = rgba(PALETTE.claude.mid, 0.9);
-      ctx.fillText("CLAUDE", this.claudeAt[0], this.h - 10);
-      ctx.fillStyle = rgba(PALETTE.mac.mid, 0.9);
-      ctx.fillText("MAC · GROK BOT", this.macAt[0], this.h - 10);
+      ctx.textBaseline = "middle";
+      const cw = ctx.measureText("M").width;
+      const spin = reduceMotion ? 0 : t * 0.05 * spinDir;
+      items.forEach((item, i) => {
+        const mid = spin + (i / items.length) * Math.PI * 2 - Math.PI / 2;
+        const bottom = Math.sin(mid) > 0;
+        const chars = [...item.text];
+        const span = (chars.length * cw) / R;
+        ctx.fillStyle = item.color;
+        ctx.globalAlpha = 0.85;
+        chars.forEach((ch, k) => {
+          const offset = (k + 0.5) * (cw / R) - span / 2;
+          const a = bottom ? mid - offset : mid + offset;
+          ctx.save();
+          ctx.translate(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+          ctx.rotate(bottom ? a - Math.PI / 2 : a + Math.PI / 2);
+          ctx.fillText(ch, 0, 0);
+          ctx.restore();
+        });
+        const dotA = mid - (span / 2 + cw / R) * (bottom ? -1 : 1);
+        ctx.fillRect(cx + Math.cos(dotA) * R - 1.5, cy + Math.sin(dotA) * R - 1.5, 3, 3);
+      });
+      ctx.globalAlpha = 1;
+      ctx.textBaseline = "alphabetic";
+    }
+
+    drawLabels(ctx) {
+      const size = Math.round(Math.max(11, Math.min(15, this.r * 0.085)));
+      ctx.font = `700 ${size}px ui-monospace, Menlo, monospace`;
+      ctx.textAlign = "center";
+      const y = Math.min(this.h - 10, this.claudeAt[1] + this.r * 1.62);
+      ctx.fillStyle = rgba(PALETTE.claude.mid, 0.95);
+      ctx.fillText("[ CLAUDE ]", this.claudeAt[0], y);
+      ctx.fillStyle = rgba(PALETTE.mac.mid, 0.95);
+      ctx.fillText("[ MAC · GROK BOT ]", this.macAt[0], y);
     }
 
     frame(nowMs) {
@@ -757,6 +908,8 @@
 
       const dt = Math.min(0.05, now - (this.lastFrame || now));
       this.lastFrame = now;
+      this.drawChannel(ctx, now, dt);
+      this.drawPulses(ctx, now);
       for (const bolt of this.bolts) {
         const age = now - bolt.born;
         const bursting = age < BURST_S && !reduceMotion;
@@ -784,6 +937,8 @@
         this.screenFlash.amount *= 0.8;
       }
       ctx.globalCompositeOperation = "source-over";
+      this.drawOrbit(ctx, this.claudeAt, this.orbits.claude, t, 1);
+      this.drawOrbit(ctx, this.macAt, this.orbits.mac, t, -1);
       this.drawLabels(ctx);
     }
 

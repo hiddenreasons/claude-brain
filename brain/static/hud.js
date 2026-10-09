@@ -248,7 +248,7 @@ function renderHud(s) {
   const cost = day.reduce((a, j) => a + jobCost(j), 0);
 
   document.getElementById("hud-claude").replaceChildren(
-    hudHead("CLAUDE · EXECUTION", `${jobs.length} jobs on record`),
+    hudHead("claude.exec", `${jobs.length} jobs on record`),
     el("div", { class: "hud-row" },
       ring([
         { value: count(["done", "followed_up"]), color: HUD_COLORS.done, label: "Done" },
@@ -265,7 +265,7 @@ function renderHud(s) {
         stat(count(["blocked", "error", "gate_failed", "stalled", "no_report"]), "stuck · 24 h", "blocked"),
       ),
     ),
-    el("div", { class: "hud-scroll" }, jobTable(jobs.slice(0, 7))),
+    el("div", { class: "hud-scroll" }, jobTable(jobs.slice(0, 9))),
     el("figure", { class: "hud-hexfig" }, hexGrid(jobs), el("figcaption", {}, "Last 60 jobs · one cell each · hover for detail")),
   );
 
@@ -273,7 +273,7 @@ function renderHud(s) {
   const blocked = open.filter((e) => e.state === "BLOCKED").length;
   const comms = s.comms || { events: 0 };
   document.getElementById("hud-mac").replaceChildren(
-    hudHead("MAC · GROK BOT · COMMAND", comms.events ? `log ${comms.events} events` : "log not started"),
+    hudHead("mac.command", comms.events ? `grok bot · log ${comms.events} events` : "grok bot · log not started"),
     el("div", { class: "hud-row" },
       radar(open),
       el("div", { class: "hud-stats" },
@@ -282,9 +282,9 @@ function renderHud(s) {
         stat(blocked, "blocked orders", "BLOCKED"),
       ),
     ),
-    traffic(s.messages || []),
-    el("div", { class: "hud-scroll" }, orderTable(open.slice(0, 7))),
+    el("div", { class: "hud-scroll" }, orderTable(open.slice(0, 9))),
   );
+  document.getElementById("comms-traffic").replaceChildren(traffic(s.messages || []));
 }
 
 window.renderHud = renderHud;

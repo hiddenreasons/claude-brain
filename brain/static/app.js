@@ -366,37 +366,157 @@ function handleMessages(s) {
   fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m, i) => setTimeout(() => brains && brains.fire(m), i * 350));
 }
 
-function messageItem(m) {
-  const dir = window.BrainsVisual ? window.BrainsVisual.directionLabel(m) : m.direction;
-  const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
-  const open = () => {
-    if (m.ref.source === "job") return openDetail(m.ref.kind, m.ref.id, m.text);
-    if (m.ref.source === "work_order") return revealOrder(m.ref.id);
-    // From MAC's log: go to the job or work order it names, if the Brain knows it.
-    if (m.ref.job && snap.folders.some((j) => j.id === m.ref.job)) return openDetail("folder", m.ref.job, m.text);
-    const order = m.ref.wo !== null && snap.inbox.find((e) => e.wo === m.ref.wo);
-    if (order) revealOrder(order.id);
-  };
-  return el("li", {},
-    el("button", {
-      type: "button", class: `msg-item ${m.blocked ? "blocked" : m.direction}`, "data-id": m.id,
-      onclick: open,
-      onmouseenter: () => brains && brains.highlight(m.id),
-      onmouseleave: () => brains && brains.highlight(null),
-      onfocus: () => brains && brains.highlight(m.id),
-      onblur: () => brains && brains.highlight(null),
-    },
-      el("span", { class: "dir" }, `${dir} · ${kind}${m.blocked ? " · BLOCKED" : ""} · `, timeEl(m.at)),
-      el("span", { class: "txt" }, m.text),
-    )
+function openMessage(m) {
+  if (m.ref.source === "job") return openDetail(m.ref.kind, m.ref.id, m.text);
+  if (m.ref.source === "work_order") return revealOrder(m.ref.id);
+  // From MAC's log: go to the job or work order it names, if the Brain knows it.
+  if (m.ref.job && snap.folders.some((j) => j.id === m.ref.job)) return openDetail("folder", m.ref.job, m.text);
+  const order = m.ref.wo !== null && snap.inbox.find((e) => e.wo === m.ref.wo);
+  if (order) revealOrder(order.id);
+}
+
+// Today's lines show the time; older lines show the date too, so the log reads in order.
+function clock(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return d.toDateString() === new Date().toDateString()
+    ? `${time}:${pad(d.getSeconds())}`
+    : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${time}`;
+}
+const TERM_LINES = 16;
+const termSeen = new Set();
+let termPrimed = false;
+
+// comms.log: newest at the bottom, like tail -f. Lines that arrive while the page is open type themselves in.
+function renderTerminal() {
+  const timed = (snap.messages || []).filter((m) => m.at && matches(m.text, m.kind)).slice(0, TERM_LINES).reverse();
+  const box = document.getElementById("messages");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  const lines = timed.map((m) => {
+    const isNew = termPrimed && !termSeen.has(m.id);
+    termSeen.add(m.id);
+    const dirClass = m.blocked ? "blocked" : m.direction;
+    const arrow = m.direction === "to_claude" ? "MAC ▸ CLAUDE" : "CLAUDE ▸ MAC";
+    const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
+    return el("li", {},
+      el("button", {
+        type: "button", class: `term-line${isNew ? " new" : ""}`, "data-id": m.id,
+        title: `${clock(m.at)} · ${arrow} · ${kind}${m.blocked ? " · BLOCKED" : ""}\n${m.text}`,
+        onclick: () => openMessage(m),
+        onmouseenter: () => brains && brains.highlight(m.id),
+        onmouseleave: () => brains && brains.highlight(null),
+        onfocus: () => brains && brains.highlight(m.id),
+        onblur: () => brains && brains.highlight(null),
+      },
+        el("span", { class: "term-time" }, clock(m.at)),
+        el("span", { class: `term-dir ${dirClass}` }, m.blocked ? `${arrow} ✖` : arrow),
+        el("span", { class: "term-txt" }, el("span", { class: "term-kind" }, `${kind.toLowerCase().replace(/ /g, "_")}:`), m.text),
+      )
+    );
+  });
+  termPrimed = true;
+  box.replaceChildren(
+    ...(lines.length ? lines : [el("li", { class: "term-end" }, "no messages yet")]),
+    el("li", { class: "term-end", "aria-hidden": "true" }, "listening"),
+  );
+  if (atBottom || !box.dataset.scrolled) {
+    box.scrollTop = box.scrollHeight;
+    box.dataset.scrolled = "1";
+  }
+}
+
+// ---------- at a glance ----------
+
+function statTile(key, value, detail, color, target) {
+  const tile = el("button", {
+    type: "button", class: "stat-tile",
+    onclick: () => target && document.getElementById(target).scrollIntoView({ behavior: "smooth", block: "start" }),
+  },
+    el("span", { class: "stat-k" }, key),
+    el("span", { class: "stat-v" }, String(value)),
+    el("span", { class: "stat-d", title: detail }, detail),
+  );
+  tile.style.setProperty("--c", color); // CSP blocks style="" attributes; the style object is allowed
+  return tile;
+}
+
+function renderStatus() {
+  const running = allJobs().filter((j) => j.state === "running" || j.state === "waiting");
+  const elsewhere = (snap.comms && snap.comms.running) || [];
+  const stuck = snap.attention.length;
+  const day = (snap.messages || []).filter((m) => m.at && Date.now() - Date.parse(m.at) < 86400000);
+  const toClaude = day.filter((m) => m.direction === "to_claude").length;
+  const last = (snap.messages || []).find((m) => m.at);
+  const runText = running.length
+    ? running.map((j) => j.id).join(", ")
+    : elsewhere.length ? `elsewhere: ${elsewhere.join(", ")}` : "nothing running";
+  document.getElementById("statusbar").replaceChildren(
+    statTile("running", running.length + elsewhere.length, runText, "var(--running)", "running-panel"),
+    statTile("needs_you", snap.status.decisions.length, "decisions in MAC's STATUS.md", "var(--mac)", "decisions-panel"),
+    statTile("stuck", stuck, stuck ? snap.attention[0].title : "nothing blocked or failing", stuck ? "var(--accent)" : "var(--done)", "attention-panel"),
+    statTile("msgs_24h", day.length, `${toClaude} MAC→Claude · ${day.length - toClaude} Claude→MAC`, "var(--claude)", "messages"),
+    statTile("last_msg", last ? relTime(last.at).replace(" ago", "") : "—",
+      last ? `${last.direction === "to_claude" ? "MAC→Claude" : "Claude→MAC"}: ${last.text}` : "none yet",
+      last && last.blocked ? "var(--accent)" : "var(--text)", "messages"),
   );
 }
 
-function renderMessages() {
-  const timed = (snap.messages || []).filter((m) => m.at).slice(0, 6);
-  document.getElementById("messages").replaceChildren(
-    ...(timed.length ? timed.map(messageItem) : [el("li", {}, empty("No messages yet."))])
+// ---------- hero readouts and brain feeds ----------
+
+function readoutLine(key, value, tone) {
+  return el("div", { class: "ro-line" }, el("span", { class: "ro-k" }, key), el("span", { class: `ro-v${tone ? ` ${tone}` : ""}` }, value));
+}
+
+const lastActionSig = new Map();
+let pulsesPrimed = false;
+
+function renderHero() {
+  const running = snap.folders.filter((j) => j.state === "running");
+  const job = running[0] || null;
+  const lastAction = job && job.activity && job.activity.length ? job.activity[job.activity.length - 1] : null;
+  const lastToClaude = (snap.messages || []).find((m) => m.at && m.direction === "to_claude");
+  const macActive = lastToClaude && Date.now() - Date.parse(lastToClaude.at) < 30 * 60000;
+  const open = snap.inbox.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state)).length;
+  document.getElementById("readout-claude").replaceChildren(
+    readoutLine("claude.state", job ? "RUNNING" : "IDLE", job ? "hot" : ""),
+    readoutLine("claude.job", job ? job.id : "—"),
+    readoutLine("claude.doing", lastAction ? (lastAction.kind === "tool" ? `${lastAction.name} · ${lastAction.summary || ""}` : lastAction.text) : "—"),
+    readoutLine("jobs.24h", String(allJobs().filter((j) => Date.now() - Date.parse(j.updated_at || 0) < 86400000).length)),
   );
+  document.getElementById("readout-mac").replaceChildren(
+    readoutLine("mac.state", macActive ? "SENDING" : "QUIET", macActive ? "hot" : ""),
+    readoutLine("mac.last_sent", lastToClaude ? relTime(lastToClaude.at) : "—"),
+    readoutLine("orders.open", String(open)),
+    readoutLine("needs.anthony", String(snap.status.decisions.length), snap.status.decisions.length ? "bad" : "ok"),
+  );
+
+  if (!brains) return;
+  // Orbiting labels: Claude's latest jobs, MAC's open orders. Colors are their real status.
+  const jobColor = { running: "#ffd166", waiting: "#ffd166", done: "#ffb15c", followed_up: "#50c8ff" };
+  brains.setOrbits({
+    claude: allJobs().slice(0, 14).map((j) => ({ text: j.id, color: jobColor[j.state] || (/(blocked|error|stalled|gate|no_report)/.test(j.state) ? "#ff4d5e" : "#8d96a5") })),
+    mac: snap.inbox.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state)).slice(0, 14)
+      .map((e) => ({ text: e.wo !== null ? `WO#${String(e.wo).padStart(3, "0")}` : (e.date || "note").slice(5), color: e.state === "BLOCKED" ? "#ff4d5e" : "#50c8ff" })),
+  });
+  // Packet flow between the brains: how busy the channel has been in the last hour.
+  const hour = (snap.messages || []).filter((m) => m.at && Date.now() - Date.parse(m.at) < 3600000);
+  brains.setTraffic({
+    toClaude: hour.filter((m) => m.direction === "to_claude").length,
+    toMac: hour.filter((m) => m.direction === "to_mac").length,
+  });
+  // Each new tool call in a running job pulses Claude's brain with its name.
+  for (const j of running) {
+    const actions = j.activity || [];
+    const sig = actions.length ? JSON.stringify(actions[actions.length - 1]) + actions.length : "";
+    const before = lastActionSig.get(j.id);
+    lastActionSig.set(j.id, sig);
+    if (!pulsesPrimed || before === undefined || before === sig) continue;
+    const prevIndex = actions.findIndex((a) => JSON.stringify(a) + "" === before);
+    const fresh = actions.slice(Math.max(prevIndex + 1, actions.length - 4));
+    fresh.forEach((a, i) => setTimeout(() => brains.pulse(a.kind === "tool" ? a.name : "thinking"), i * 300));
+  }
+  pulsesPrimed = true;
 }
 
 function startDemo() {
@@ -420,7 +540,9 @@ function startDemo() {
 function renderAll() {
   if (!snap) return;
   if (window.renderHud) window.renderHud(snap);
-  renderMessages();
+  renderStatus();
+  renderHero();
+  renderTerminal();
   renderAttention();
   renderRunning();
   renderJobs();
@@ -531,7 +653,7 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("bolt-tip"),
       // Hovering a bolt lights its line in "Latest messages".
       (id) => {
-        for (const node of document.querySelectorAll(".msg-item")) {
+        for (const node of document.querySelectorAll(".term-line")) {
           node.classList.toggle("lit", id !== null && node.getAttribute("data-id") === id);
         }
       },

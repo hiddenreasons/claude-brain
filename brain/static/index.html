@@ -12,8 +12,8 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <h1>Claude Brain</h1>
-      <p class="sub">MAC and Claude, live. Read-only.</p>
+      <h1><span class="prompt" aria-hidden="true">~/</span>claude-brain<span class="cursor" aria-hidden="true"></span></h1>
+      <p class="sub">MAC ⇄ Claude · live · read-only</p>
     </div>
     <div class="live" role="status" aria-live="polite">
       <span class="dot" id="live-dot" aria-hidden="true"></span>
@@ -22,24 +22,34 @@
     <button type="button" class="motion-toggle" id="motion-toggle" aria-pressed="false">Motion</button>
     <label class="search">
       <span class="visually-hidden">Search jobs and work orders</span>
-      <input id="search" type="search" placeholder="Search jobs and work orders" autocomplete="off">
+      <input id="search" type="search" placeholder="grep jobs, orders, messages…" autocomplete="off">
     </label>
   </header>
 
-  <section class="brains" aria-labelledby="h-brains">
+  <section class="statusbar" id="statusbar" aria-label="At a glance"></section>
+
+  <section class="hero" aria-labelledby="h-brains">
     <h2 id="h-brains" class="visually-hidden">Claude and MAC</h2>
-    <aside class="hud hud-left" id="hud-claude" aria-label="Claude's jobs"></aside>
-    <div class="brains-center">
-      <div class="brains-stage">
-        <canvas id="brains-canvas" role="img"
-          aria-label="Claude's brain in orange on the left, MAC's brain in blue on the right. Lightning between them shows each message as it happens."></canvas>
-        <div class="bolt-tip" id="bolt-tip" role="tooltip" hidden></div>
-      </div>
-      <div class="brains-feed">
-        <h3>Latest messages</h3>
-        <ol id="messages" aria-live="polite"></ol>
-      </div>
+    <div class="brains-stage">
+      <canvas id="brains-canvas" role="img"
+        aria-label="Claude's brain in orange on the left, MAC's brain in blue on the right. Lightning between them shows each message as it happens."></canvas>
+      <div class="hero-readout hero-left" id="readout-claude" aria-label="Claude right now"></div>
+      <div class="hero-readout hero-right" id="readout-mac" aria-label="MAC right now"></div>
+      <div class="bolt-tip" id="bolt-tip" role="tooltip" hidden></div>
     </div>
+  </section>
+
+  <section class="consoles" aria-label="Live consoles">
+    <aside class="hud hud-left" id="hud-claude" aria-label="Claude's jobs"></aside>
+    <section class="hud hud-comms" aria-labelledby="h-comms">
+      <div class="hud-head">
+        <span class="hud-blink" aria-hidden="true"></span>
+        <h2 class="hud-title" id="h-comms">comms.log</h2>
+        <span class="hud-sub">$ tail -f · every MAC ⇄ Claude message</span>
+      </div>
+      <div id="comms-traffic"></div>
+      <ol class="term" id="messages" aria-live="polite"></ol>
+    </section>
     <aside class="hud hud-right" id="hud-mac" aria-label="MAC's work orders"></aside>
   </section>
 
@@ -50,7 +60,7 @@
         <div id="attention"></div>
       </section>
 
-      <section aria-labelledby="h-running" class="panel">
+      <section aria-labelledby="h-running" class="panel" id="running-panel">
         <h2 id="h-running">Running now <span class="count" id="running-count"></span></h2>
         <div id="running"></div>
       </section>
@@ -66,7 +76,7 @@
     </div>
 
     <div class="col">
-      <section aria-labelledby="h-decisions" class="panel">
+      <section aria-labelledby="h-decisions" class="panel" id="decisions-panel">
         <h2 id="h-decisions">Waiting on Anthony <span class="count" id="decisions-count"></span></h2>
         <p class="source">From MAC's STATUS.md</p>
         <ul class="bullets" id="decisions"></ul>
