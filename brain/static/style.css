@@ -783,3 +783,12 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
   .term-txt { grid-column: 1 / -1; grid-row: 2; white-space: normal; }
   .term-st { grid-column: 3; grid-row: 1; }
 }
+
+/* Learning panel */
+.learn-stats { margin: 0 0 10px; font-size: 12.5px; color: var(--muted); }
+.learn-stats b { color: #e6edf2; font-family: var(--mono); }
+.pms { list-style: none; margin: 0; padding: 0; }
+.pms li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 4px 8px; padding: 6px 0; border-bottom: 1px solid rgba(var(--wire-rgb), 0.08); font-size: 12px; }
+.pm-life { font: 700 9.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: #7ff3e4; }
+.pm-text { color: var(--muted); overflow-wrap: anywhere; }
+.known { font: 700 9.5px var(--mono); letter-spacing: 0.08em; padding: 1px 6px; border-radius: 3px; background: rgba(255, 196, 0, 0.14); color: #ffd666; }

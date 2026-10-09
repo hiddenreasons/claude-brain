@@ -42,6 +42,7 @@ function foundationLine(item) {
     bits.push(el("span", { class: "since", title: `${item.lifecycle} since ${item.state_since}` }, `${item.lifecycle} ${elapsed(item.state_since)}`));
   }
   for (const flag of item.flags || []) bits.push(el("span", { class: "flag-red", title: flag }, flag.split(":")[0]));
+  if (item.known_issue) bits.push(el("span", { class: "known", title: item.known_issue }, `KNOWN ISSUE ${item.known_issue.split(":")[0]}`));
   if (item.no_decision_id) bits.push(el("span", { class: "unverified", title: "Briefs written since the decision log started must cite the A-xxx IDs they follow" }, "NO A-ID"));
   return bits.length ? el("div", { class: "fnd" }, bits) : null;
 }
@@ -1157,6 +1158,27 @@ function renderFlow() {
   document.getElementById("flow").replaceChildren(table, el("p", { class: "for-mac-h" }, "Recommendations for MAC · ~/.vader-mac-runs/brain/RECOMMENDATIONS.md"), recList);
 }
 
+// Self-learning: post-mortems, proposed lessons (drafts until Anthony or MAC approves) and weekly stats.
+function renderLearning() {
+  const l = snap.learning || { proposed: [], approved: [], weekly: {}, recent_postmortems: [] };
+  const w = l.weekly || {};
+  const stat = (k, v) => el("span", { class: "ls" }, el("b", {}, v === null || v === undefined ? "—" : String(v)), ` ${k}`);
+  const stats = el("p", { class: "learn-stats" }, "This week: ", stat("alerts", w.alerts), " · ", stat("false", w.false_alerts),
+    " · ", stat("duplicates", w.duplicates), " · ", stat("min median to clear", w.median_clear_min));
+  const lessonRow = (x) => el("li", { class: `rec rec-${x.status}` },
+    el("span", { class: "rec-id" }, x.id), el("span", { class: `rec-st st-${x.status === "approved" ? "applied" : x.status === "proposed" ? "open" : "declined"}` }, x.status.toUpperCase()),
+    el("span", { class: "rec-what" }, x.title), el("span", { class: "rec-opt" }, `Draft: ${x.draft}`));
+  const lessons = [...(l.proposed || []), ...(l.approved || [])];
+  const lessonList = lessons.length ? el("ol", { class: "recs" }, lessons.slice(0, 8).map(lessonRow)) : empty("No lessons proposed: nothing has repeated yet.");
+  const pms = (l.recent_postmortems || []);
+  const pmList = pms.length ? el("ol", { class: "pms" }, pms.map((p) => el("li", {},
+    el("span", { class: "a-job" }, p.job), el("span", { class: "pm-life" }, p.lifecycle),
+    el("span", { class: "pm-text" }, `${clipText(p.happened || "", 120)} · slowed: ${p.slowed} · fixed: ${clipText(p.fixed || "", 80)}`)))) : empty("No post-mortems yet.");
+  document.getElementById("learning").replaceChildren(stats,
+    el("p", { class: "for-mac-h" }, "Proposed lessons · ~/.vader-mac-runs/brain/PROPOSED-LESSONS.md"), lessonList,
+    el("p", { class: "for-mac-h" }, "Recent post-mortems · LEARNING-LOG.md"), pmList);
+}
+
 function renderAll() {
   if (!snap) return;
   if (window.renderHud) window.renderHud(snap);
@@ -1167,6 +1189,7 @@ function renderAll() {
   renderOverdue();
   renderOps();
   renderFlow();
+  renderLearning();
   renderAudit();
   renderWinBox();
   renderAttention();

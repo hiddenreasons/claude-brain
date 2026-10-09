@@ -8,11 +8,22 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List
 
 from .advisor import Advisor, sample_flow
 from .brainfiles import BrainFiles, Ledger, audit
+from .learning import (
+    apply_approved,
+    held_by_grace,
+    lesson_id,
+    lessons_page,
+    postmortems,
+    proposals,
+    read_lesson_statuses,
+    weekly_stats,
+)
 
 log = logging.getLogger("claude-brain")
 
@@ -37,6 +48,20 @@ class Recorder:
         self.recommendations: List[Dict[str, Any]] = []
         self.alerts = Ledger(files, "alerts.jsonl")
         self.seen = Ledger(files, "audit.jsonl", key="key")
+        self.postmortems = Ledger(files, "learning.jsonl", key="key")
+        self.lessons = Ledger(files, "lessons.jsonl", key="id")
+        self.learning: Dict[str, Any] = {}
+
+    def _lessons(self) -> List[Dict[str, Any]]:
+        """Every proposed lesson (append-only log) with the status Anthony or MAC set on the page."""
+        statuses = read_lesson_statuses(self.files.read("PROPOSED-LESSONS.md"))
+        out = []
+        for r in self.files.records("lessons.jsonl"):
+            st = statuses.get(r["id"], {"status": "proposed", "note": ""})
+            out.append({**r, **st})
+        rank = {"proposed": 0, "approved": 1, "declined": 2}
+        out.sort(key=lambda lesson: (rank.get(lesson["status"], 9), lesson.get("at") or ""))
+        return out
 
     def _once(self, key: str, event: str, job: str, change: str, who: str) -> bool:
         if self.seen.has(key):
@@ -49,8 +74,18 @@ class Recorder:
         counts = {"alerts": 0, "clears": 0, "decisions": 0, "bugs": 0}
         jobs = {f"{j['kind']}:{j['id']}": j for j in snapshot.get("folders", []) + snapshot.get("oneshots", [])}
         alert_log = {r.get("key"): r for r in self.files.records("alerts.jsonl")}
+        # Approved lessons only (drafts change nothing): known-issue notes, and holds on self-clearing alerts.
+        approved = [lesson for lesson in self._lessons() if lesson["status"] == "approved"]
+        apply_approved(snapshot, approved)
         for item in snapshot.get("attention", []):
             key = alert_key(item, jobs)
+            source_job = jobs.get(f"{item.get('kind')}:{item['id']}", {})
+            held = held_by_grace(
+                item, approved, time.time(), source_job.get("report_at") or source_job.get("updated_at")
+            )
+            if held:
+                item["held_by"] = held
+                continue
             if self.alerts.add(key, {"job": item["id"], "state": item["state"], "title": item.get("title")}):
                 audit(
                     self.files,
@@ -116,6 +151,37 @@ class Recorder:
                 )
         self.advisor.write_page(recs)
         self.recommendations = recs
+        # Part 5: post-mortems, proposed lessons (drafts), weekly stats.
+        restarts = {st["id"]: st["count"] for st in (snapshot.get("ops") or {}).get("storms", [])}
+        for pm in postmortems(snapshot, restarts):
+            if self.postmortems.add(pm["key"], {"kind": "postmortem", **{k: v for k, v in pm.items() if k != "key"}}):
+                counts["postmortems"] = counts.get("postmortems", 0) + 1
+        alerts_log, audit_log = self.files.records("alerts.jsonl"), self.files.records("audit.jsonl")
+        for prop in proposals(findings, alerts_log, audit_log):
+            lid = lesson_id(prop["key"])
+            if self.lessons.add(lid, prop):
+                audit(self.files, "proposal", lid, f"proposed lesson: {prop['title']}"[:300])
+                counts["proposals"] = counts.get("proposals", 0) + 1
+        lessons = self._lessons()
+        for lesson in lessons:
+            if lesson["status"] != "proposed":
+                self._once(
+                    f"lesson-status:{lesson['id']}|{lesson['status']}",
+                    "lesson",
+                    lesson["id"],
+                    f"{lesson['status']}: {lesson['title']}"[:300],
+                    "Anthony / MAC",
+                )
+        self.files.write("PROPOSED-LESSONS.md", lessons_page(lessons))
+        self.files.write("LEARNING-LOG.md", learning_log_page(self.files.records("learning.jsonl")))
+        snapshot["learning"] = self.learning = {
+            "proposed": [lsn for lsn in lessons if lsn["status"] == "proposed"],
+            "approved": [lsn for lsn in lessons if lsn["status"] == "approved"],
+            "weekly": weekly_stats(alerts_log, audit_log, now),
+            "recent_postmortems": [r for r in self.files.records("learning.jsonl") if r.get("kind") == "postmortem"][
+                -8:
+            ][::-1],
+        }
         year, week, _ = now.isocalendar()
         self.files.write(
             f"weekly-{year}-W{week:02d}.md", weekly_text(recs, snapshot.get("learning") or {}, f"{year}-W{week:02d}")
@@ -177,6 +243,21 @@ def digest_text(snapshot: Dict[str, Any], day: str) -> str:
         "",
     ]
     lines += [f"## Lessons proposed ({len(lessons)})", ""] + [f"- {lesson['title']}" for lesson in lessons] + [""]
+    return "\n".join(lines)
+
+
+def learning_log_page(records: List[Dict[str, Any]]) -> str:
+    """Post-mortems, newest first (every one kept; the log is append-only)."""
+    lines = ["# Learning log", "", "Short post-mortems Claude Brain writes after each job resolves.", ""]
+    for r in [r for r in records if r.get("kind") == "postmortem"][::-1][:300]:
+        lines += [
+            f"## {r.get('job')} · {r.get('lifecycle')} · {r.get('at')}",
+            "",
+            f"- **What happened:** {r.get('happened')}",
+            f"- **What slowed it:** {r.get('slowed')}",
+            f"- **What fixed it:** {r.get('fixed')}",
+            "",
+        ]
     return "\n".join(lines)
 
 
