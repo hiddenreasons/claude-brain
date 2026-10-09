@@ -529,7 +529,13 @@
         // reduced motion: the message shows as a still flash on both nodes, nothing moves
         for (const f of this.volley.flashes) {
           if (f.key !== n.key || (f.from !== st.key && f.to !== st.key)) continue;
-          ctx.beginPath(); ctx.arc(x, y, 9 * sc, 0, 7); ctx.strokeStyle = rgba(hexRgb(f.color) || LINK, 0.95); ctx.lineWidth = 2; ctx.stroke();
+          // a still glow in the job's colour: a soft disc and two rings, no movement
+          const fc = hexRgb(f.color) || LINK;
+          const g = ctx.createRadialGradient(x, y, 0, x, y, 20 * sc);
+          g.addColorStop(0, rgba(fc, 0.55)); g.addColorStop(1, rgba(fc, 0));
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 20 * sc, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(x, y, 9 * sc, 0, 7); ctx.strokeStyle = rgba(fc, 1); ctx.lineWidth = 2.2; ctx.stroke();
+          ctx.beginPath(); ctx.arc(x, y, 14 * sc, 0, 7); ctx.strokeStyle = rgba(fc, 0.6); ctx.lineWidth = 1; ctx.stroke();
         }
         const la = sstep(0.1, 0.32, z) || (sel || twin ? 1 : 0);
         if (la > 0 && (act !== "done" || twin)) labels.push({ n, x, y, z, r: 7 * sc, a: twin ? 1 : la * base, sel: sel || twin });

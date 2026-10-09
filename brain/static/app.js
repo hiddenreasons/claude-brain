@@ -707,6 +707,8 @@ function readoutLine(key, value, tone) {
 }
 
 const lastActionSig = new Map();
+const lastLogMove = new Map();
+let lastBeat = null;
 let pulsesPrimed = false;
 
 function renderHero() {
@@ -745,20 +747,33 @@ function renderHero() {
     toClaude: hour.filter((m) => m.direction === "to_claude").length,
     toMac: hour.filter((m) => m.direction === "to_mac").length,
   });
-  // Each new tool call in a running job pulses Claude's brain with its name.
+  // Real activity makes the stations spark: each new tool call or reply in a running job (with its name),
+  // or, when there's no new action, its log moving at all. A fresh Windows heartbeat tick sparks MAC's.
   for (const j of running) {
     const actions = j.activity || [];
-    const sig = actions.length ? JSON.stringify(actions[actions.length - 1]) + actions.length : "";
+    const lastKey = actions.length ? JSON.stringify(actions[actions.length - 1]) : "";
     const before = lastActionSig.get(j.id);
-    lastActionSig.set(j.id, sig);
-    if (!pulsesPrimed || before === undefined || before === sig) continue;
-    const prevIndex = actions.findIndex((a) => JSON.stringify(a) + "" === before);
-    const fresh = actions.slice(Math.max(prevIndex + 1, actions.length - 4));
-    fresh.forEach((a, i) => setTimeout(() => {
-      brains.pulse(a.kind === "tool" ? a.name : "thinking");
-      brains.spark("claude", j.id); // synapse: the job's node sparks on Claude's station
-    }, i * 300));
+    const movedBefore = lastLogMove.get(j.id);
+    lastActionSig.set(j.id, lastKey);
+    lastLogMove.set(j.id, j.stream_updated_at);
+    if (!pulsesPrimed || before === undefined) continue;
+    let fresh = [];
+    if (lastKey !== before) {
+      const prev = actions.findIndex((a) => JSON.stringify(a) === before); // -1 when it scrolled out
+      fresh = actions.slice(prev >= 0 ? prev + 1 : Math.max(0, actions.length - 1)).slice(-4);
+    }
+    if (fresh.length) {
+      fresh.forEach((a, i) => setTimeout(() => {
+        brains.pulse(a.kind === "tool" ? a.name : "thinking");
+        brains.spark("claude", j.id); // synapse: the job's node sparks on Claude's station
+      }, i * 300));
+    } else if (j.stream_updated_at && j.stream_updated_at !== movedBefore) {
+      brains.spark("claude", j.id); // its log moved: Claude is working, even without a new tool call
+    }
   }
+  const beat = snap.windows || {};
+  if (pulsesPrimed && beat.fresh && beat.job && beat.at && beat.at !== lastBeat) brains.spark("mac", beat.job);
+  lastBeat = beat.at;
   pulsesPrimed = true;
 }
 
@@ -1168,7 +1183,15 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.BrainsVisual) {
     const motion = window.BrainsVisual.motion;
     const toggle = document.getElementById("motion-toggle");
-    toggle.textContent = motion.calm ? "Motion: Calm" : "Motion: Full";
+    toggle.textContent = motion.calm ? (motion.systemCalm && !motion.choice ? "Motion: Calm (Mac setting)" : "Motion: Calm") : "Motion: Full";
+    if (motion.calm) {
+      // Say why the stations are still: with Reduce Motion on, Safari and Chrome both ask for calm motion.
+      document.querySelector(".brains-stage").append(el("p", { class: "calm-note" },
+        motion.systemCalm && !motion.choice
+          ? "Calm motion: this Mac's Reduce Motion setting is on, so messages show as a brief glow on both jobs instead of bolts. "
+          : "Calm motion is on, so messages show as a brief glow on both jobs instead of bolts. ",
+        el("button", { type: "button", onclick: () => window.BrainsVisual.setMotion("full") }, "Show bolts and sparks")));
+    }
     toggle.setAttribute("aria-pressed", String(!motion.calm));
     toggle.title = motion.systemCalm
       ? "Your system has Reduce Motion on. Choose Full to see the live animation here anyway."
