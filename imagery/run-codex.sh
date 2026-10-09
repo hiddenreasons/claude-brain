@@ -4,7 +4,8 @@
 set -euo pipefail
 ROOT="/Users/anthony/Documents/Active Projects/Claude Brain"
 CODEX=/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex
-"$CODEX" exec -m gpt-6-astra -c model_reasoning_effort='"high"' \
+# Anthony's setting (2026-10-09): Codex image jobs use GPT-6 Astra at medium reasoning.
+"$CODEX" exec -m gpt-6-astra -c model_reasoning_effort='"medium"' \
   --sandbox workspace-write --skip-git-repo-check \
   -C "$ROOT/brain/static/media" \
   -i "/Users/anthony/Desktop/claude brain/2.png" \
