@@ -123,6 +123,20 @@ function draftForDecision(text) {
   };
 }
 
+// A job MAC logged in comms.jsonl (for example on Windows) whose last message says it's blocked.
+function draftForCommsJob(job, messages) {
+  const last = messages[0];
+  const lines = [
+    `MAC, about job ${job} from your message log (from Claude Brain, ${nowStamp()}):`,
+    "",
+    `Last message (${last.at}${last.machine ? `, ${last.machine}` : ""}): "${quote(last.text, 400)}"`,
+    "",
+    "It reads as blocked and nothing has cleared it. Please unblock it, or log it as cleared if it's already fixed.",
+    "Reply with what changed and the proof (commit, test run or file).",
+  ];
+  return { to: "mac", subject: `Job ${job}: blocked`, body: lines.join("\n") };
+}
+
 function draftForIncident(issue) {
   const lines = [
     `MAC, about an incident in ISSUES-LOG.md (from Claude Brain, ${nowStamp()}):`,
@@ -194,4 +208,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 window.askButton = askButton;
-window.askDrafts = { draftForJob, draftForOrder, draftForDecision, draftForIncident, draftForBrain, suggestedBuilder };
+window.askDrafts = { draftForJob, draftForOrder, draftForDecision, draftForIncident, draftForBrain, draftForCommsJob, suggestedBuilder };

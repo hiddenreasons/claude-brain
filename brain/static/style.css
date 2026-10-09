@@ -134,7 +134,7 @@ strong { color: #fff; font-weight: 600; }
 }
 .brains-stage::before { left: 6px; top: 6px; border-left-width: 1.2px; border-top-width: 1.2px; }
 .brains-stage::after { right: 6px; bottom: 6px; border-right-width: 1.2px; border-bottom-width: 1.2px; }
-#brains-canvas { display: block; width: 100%; height: clamp(360px, 46vw, 600px); }
+#brains-canvas { display: block; width: 100%; height: clamp(380px, 38vw, 560px); }
 .hero-readout {
   position: absolute; top: 16px; max-width: 30%; padding: 8px 11px; pointer-events: none;
   font: 500 11px/1.65 var(--mono); border-radius: 8px;
@@ -167,6 +167,64 @@ strong { color: #fff; font-weight: 600; }
   font: 600 10px var(--mono); letter-spacing: 0.14em; color: #000; background: rgba(var(--wire-rgb), 0.85);
   padding: 4px 8px; border-radius: 3px;
 }
+
+/* ---------- node popup: VADER's node terminal window (Issues rev 7) ---------- */
+#brains-canvas { cursor: grab; touch-action: none; }
+.ds-term {
+  position: absolute; z-index: 4; width: min(430px, calc(100% - 16px)); display: flex; flex-direction: column; overflow: hidden;
+  border-radius: var(--win-radius); font: 11px/1.5 var(--mono); color: #cfe3ec;
+  background: linear-gradient(180deg, rgba(22, 30, 37, 0.82), rgba(12, 17, 22, 0.88));
+  backdrop-filter: blur(28px) saturate(1.7); -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  border: 0.5px solid rgba(0, 0, 0, 0.75);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13), 0 12px 32px rgba(0, 0, 0, 0.5), 0 34px 96px rgba(0, 0, 0, 0.58), 0 0 34px -14px rgba(var(--wire-rgb), 0.65);
+  animation: pop-in 0.18s ease-out both;
+}
+.ds-term.you { box-shadow: inset 0 0 0 1px rgba(255, 120, 110, 0.22), 0 12px 32px rgba(0, 0, 0, 0.5), 0 34px 96px rgba(0, 0, 0, 0.58), 0 0 34px -12px rgba(225, 6, 0, 0.6); }
+.ds-tbar {
+  position: relative; flex: none; height: 28px; display: flex; align-items: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+  border-bottom: 1px solid rgba(0, 0, 0, 0.45); box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+.ds-tls { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); display: flex; gap: 8px; }
+.ds-tl { display: block; width: 12px; height: 12px; padding: 0; border-radius: 50%; border: 0.5px solid; }
+.ds-tl.r { background: #ff5f57; border-color: #e0443e; cursor: pointer; }
+.ds-tl.y { background: #febc2e; border-color: #dea123; }
+.ds-tl.g { background: #28c840; border-color: #1aab29; }
+.ds-tl.r:hover::after { content: "×"; display: grid; place-items: center; height: 100%; font: 700 11px/1 var(--ui); color: rgba(0, 0, 0, 0.55); }
+.ds-ttl {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: calc(100% - 170px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px/1 var(--ui); color: rgba(235, 242, 245, 0.86);
+}
+.ds-ttl b { font-weight: 600; color: #f3f7f9; }
+.ds-live { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); font: 600 8px/1 var(--mono); font-style: normal; letter-spacing: 0.14em; color: var(--done); }
+.ds-thead { padding: 8px 11px; border-bottom: 1px solid rgba(var(--wire-rgb), 0.14); background: rgba(var(--wire-rgb), 0.03); }
+.ds-tl1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ds-tsum { font: 500 12px/1.35 var(--ui); color: #eef6f9; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ds-tl2 { margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-tl2 code { background: none; padding: 0; font-size: 10px; color: rgba(var(--wire-rgb), 0.95); }
+.ds-stream { padding: 6px 11px 8px 8px; background: rgba(0, 0, 0, 0.28); max-height: 220px; overflow: auto; scrollbar-width: thin; }
+.ds-ln { padding-left: 34px; text-indent: -34px; margin: 2px 0; overflow-wrap: anywhere; color: #dfeaee; }
+.ds-tg {
+  display: inline-block; width: 28px; margin-right: 6px; text-indent: 0; text-align: center; vertical-align: 1px;
+  font: 600 7.5px/1 var(--mono); letter-spacing: 0.06em; padding: 2px 0; border-radius: 2px;
+  color: #04121a; background: rgba(var(--wire-rgb), 0.85);
+}
+.ds-tg.LOG { color: #e9f6fb; background: rgba(255, 255, 255, 0.14); }
+.ds-tg.WHY, .ds-tg.ASK { color: #fff; background: rgba(225, 6, 0, 0.7); }
+.ds-tg.FIX { color: #03120a; background: var(--done); }
+.ds-tg.WAIT { color: rgba(var(--wire-rgb), 0.9); background: none; border: 1px dashed rgba(var(--wire-rgb), 0.5); padding: 1px 0; }
+.ds-acts { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 8px 11px; border-top: 1px solid rgba(var(--wire-rgb), 0.14); }
+.ds-more {
+  height: 24px; padding: 0 10px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+  border: 1px solid rgba(var(--wire-rgb), 0.4); background: rgba(var(--wire-rgb), 0.08); color: #eaf6fb; font: 600 11px/1 var(--ui);
+}
+.ds-more:hover { border-color: rgba(var(--wire-rgb), 0.95); }
+.ds-foot {
+  display: flex; justify-content: space-between; gap: 8px; padding: 3px 11px;
+  font: 500 8px/1.4 var(--mono); letter-spacing: 0.06em; color: rgba(var(--wire-rgb), 0.55);
+  border-top: 1px solid rgba(var(--wire-rgb), 0.14); background: rgba(0, 0, 0, 0.3);
+}
+@keyframes pop-in { from { opacity: 0; transform: translateY(4px) scale(0.985); } to { opacity: 1; transform: none; } }
 
 /* ---------- native macOS windows (Issues rev 7): consoles and panels ---------- */
 .consoles {
@@ -555,6 +613,7 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
   .statusbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .consoles { grid-template-columns: minmax(0, 1fr); }
   .hero-readout { display: none; }
+  #brains-canvas { height: 700px; }
   .hud-row { flex-wrap: wrap; justify-content: center; }
   .hud-sub { display: none; }
   .term-line { grid-template-columns: 50px minmax(0, 1fr) auto; }

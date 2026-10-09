@@ -24,7 +24,7 @@ const actionBadge = (action) => el("span", { class: `act act-${action}` }, ACTIO
 const JOB_LIST_LIMIT = 80;
 const FRESH_MS = 90_000;
 
-const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false } };
+const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false }, openNode: null };
 const demoMode = new URLSearchParams(location.search).has("demo");
 let snap = null;
 let firstLoad = true;
@@ -645,13 +645,10 @@ function renderHero() {
   );
 
   if (!brains) return;
-  // Orbiting labels: Claude's latest jobs, MAC's open orders. Colors are their real status.
-  const jobColor = { running: "#f4f7fa", waiting: "#f4f7fa", done: "#ffb15c", followed_up: "#7ff3e4", cleared: "#7ff3c4" };
-  brains.setOrbits({
-    claude: allJobs().slice(0, 14).map((j) => ({ text: j.id, color: jobColor[j.state] || (/(blocked|error|stalled|gate|no_report)/.test(j.state) ? "#ff6a5e" : "#80808b") })),
-    mac: snap.inbox.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state)).slice(0, 14)
-      .map((e) => ({ text: e.wo !== null ? `WO#${String(e.wo).padStart(3, "0")}` : (e.date || "note").slice(5), color: e.state === "BLOCKED" ? "#ff6a5e" : "#6fd7ff" })),
-  });
+  // The two Death Stars: live items as nodes, coloured by their action label.
+  brains.setNodes(stationNodes());
+  brains.setMessages(snap.messages);
+  if (ui.openNode) openNodePopup(brains.findNode(ui.openNode), true);
   // Packet flow between the brains: how busy the channel has been in the last hour.
   const hour = (snap.messages || []).filter((m) => m.at && Date.now() - Date.parse(m.at) < 3600000);
   brains.setTraffic({
@@ -671,6 +668,174 @@ function renderHero() {
   }
   pulsesPrimed = true;
 }
+
+// ---------- Death Star nodes and their popup ----------
+
+const DAY = 864e5;
+const plain = (text) => String(text || "").replace(/[*`~]/g, "").replace(/\s+/g, " ").trim();
+const clipText = (text, n) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
+
+// Orange station: Claude's jobs and the work orders. Blue station: MAC's own and Windows jobs from its
+// message log, and approvals waiting on Anthony. Finished items show faint for a day, then drop off.
+function stationNodes() {
+  const claude = [];
+  let doneJobs = 0;
+  for (const j of allJobs()) {
+    if (j.action === "done" && (doneJobs >= 18 || !(Date.now() - Date.parse(j.updated_at) < DAY))) continue;
+    if (j.action === "done") doneJobs += 1;
+    const who = j.action_who ? `${j.action_who}${j.action_at ? ` · ${relTime(j.action_at)}` : ""}` : "";
+    claude.push({
+      id: `job:${j.kind}:${j.id}`, label: j.id, title: plain(j.title || j.id), action: j.action,
+      kindLabel: j.kind === "folder" ? "Claude job" : "Claude one-shot",
+      sub: plain(j.action === "in_progress" ? who : j.action_note || ""), ref: { type: "job", kind: j.kind, id: j.id },
+    });
+  }
+  for (const e of snap.inbox) {
+    if (e.action === "done") continue;
+    claude.push({
+      id: `wo:${e.id}`, label: e.wo !== null ? `WO #${String(e.wo).padStart(3, "0")}` : clipText(plain(e.title), 22),
+      title: plain(e.title), action: e.action, kindLabel: "Work order", sub: plain(e.action_note || ""), ref: { type: "order", id: e.id },
+    });
+  }
+
+  const mac = [];
+  const known = new Set(allJobs().map((j) => j.id));
+  const running = new Set((snap.comms && snap.comms.running) || []);
+  const byJob = new Map();
+  for (const m of snap.messages || []) { // newest first
+    const job = m.ref && m.ref.job;
+    if (!job || known.has(job) || !m.at) continue;
+    if (!byJob.has(job)) byJob.set(job, []);
+    byJob.get(job).push(m);
+  }
+  for (const [job, ms] of byJob) {
+    const last = ms[0];
+    const action = last.blocked && !last.cleared ? "needs_anthony" : running.has(job) ? "in_progress" : "done";
+    if (action === "done" && Date.now() - Date.parse(last.at) > DAY) continue;
+    const onWindows = ms.some((m) => m.machine === "windows");
+    mac.push({
+      id: `comms:${job}`, label: job, title: plain(last.text), action, kindLabel: onWindows ? "Windows job" : "MAC job",
+      sub: `${onWindows ? "on Windows · " : ""}${relTime(last.at)}`, ref: { type: "comms", job },
+    });
+  }
+  openDecisions().forEach((d) => {
+    const text = plain(d);
+    mac.push({
+      id: `decision:${text.slice(0, 60)}`, label: "Approval", title: text, action: "needs_anthony",
+      kindLabel: "Waiting on Anthony", sub: clipText(text, 40), ref: { type: "decision", text: d },
+    });
+  });
+  return { claude, mac };
+}
+
+function closeNodePopup() {
+  const old = document.getElementById("ds-term");
+  if (old) old.remove();
+  ui.openNode = null;
+  if (brains) brains.select(null);
+}
+
+const logLine = (tag, ...text) => el("div", { class: "ds-ln" }, el("span", { class: `ds-tg ${tag}` }, tag), ...text);
+
+// What the popup shows for each kind of node: status, the last log line, the report, and the actions.
+function nodeView(node) {
+  const r = node.ref;
+  if (r.type === "job") {
+    const j = findJob(r.kind, r.id);
+    if (!j) return null;
+    const lines = [logLine("ST", `${STATE_LABELS[j.state] || j.state}${j.action_who ? ` · ${j.action_who}` : ""}${j.action_at ? ` · log moved ${relTime(j.action_at)}` : ""}`)];
+    const acts = j.activity || [];
+    const lastAct = acts[acts.length - 1];
+    if (lastAct) lines.push(logLine("LOG", lastAct.kind === "tool" ? `${lastAct.name}: ${lastAct.summary || ""}` : lastAct.text || ""));
+    else if (j.note || j.result_preview) lines.push(logLine("LOG", clipText(plain(j.note || j.result_preview), 220)));
+    if (j.report_headline) lines.push(logLine("RPT", md(j.report_headline)));
+    if (j.followed_up_by) lines.push(logLine("FIX", `${j.state === "cleared" ? "Cleared by MAC" : "MAC is handling it"} · ${clipText(plain(j.followed_up_by), 160)}`));
+    if (j.action_note && j.action !== "in_progress") lines.push(logLine("WHY", md(j.action_note)));
+    return {
+      src: j.kind === "folder" ? `~/.vader-mac-runs/${j.id}/` : `~/.vader-mac-runs/msg${j.id}.txt`, lines,
+      fix: j.alertable ? ask(() => window.askDrafts.draftForJob(findJob(r.kind, r.id) || j)) : null,
+      more: ["Full details ▸", () => openDetail(r.kind, r.id, j.title)],
+    };
+  }
+  if (r.type === "order") {
+    const e = findOrder(r.id);
+    if (!e) return null;
+    const lines = [logLine("ST", STATE_LABELS[e.state] || e.state)];
+    if (e.status_text) lines.push(logLine("LOG", md(e.status_text)));
+    if (e.action_note) lines.push(logLine(e.action === "queued" ? "WAIT" : "WHY", md(e.action_note)));
+    const last = e.replies[e.replies.length - 1];
+    if (last) lines.push(logLine("RPT", `${last.direction === "to_mac" ? "Claude → MAC" : "MAC → Claude"}: `, md(clipText(last.text, 220))));
+    return {
+      src: `VADER docs/CLAUDE INBOX.md · line ${e.line}`, lines,
+      fix: e.alertable ? ask(() => window.askDrafts.draftForOrder(findOrder(r.id) || e)) : null,
+      more: ["Show in list ▸", () => { closeNodePopup(); revealOrder(r.id); }],
+    };
+  }
+  if (r.type === "comms") {
+    const ms = (snap.messages || []).filter((m) => m.ref && m.ref.job === r.job);
+    if (!ms.length) return null;
+    const lines = ms.slice(0, 5).map((m) => logLine("LOG", `${clock(m.at)} ${m.direction === "to_claude" ? "MAC → Claude" : "Claude → MAC"}${m.machine ? ` (${m.machine})` : ""}: `, md(clipText(m.text, 200))));
+    return {
+      src: "~/.vader-mac-runs/brain/comms.jsonl", lines,
+      fix: node.action === "needs_anthony" ? ask(() => window.askDrafts.draftForCommsJob(r.job, ms)) : null,
+      more: ["Show in comms ▸", () => { closeNodePopup(); document.getElementById("messages").scrollIntoView({ behavior: "smooth", block: "center" }); }],
+    };
+  }
+  if (r.type === "decision") {
+    return {
+      src: "MAC's STATUS.md · Open decisions awaiting Anthony", lines: [logLine("ASK", md(r.text))],
+      fix: ask(() => window.askDrafts.draftForDecision(r.text), "Copy my decision"),
+      more: ["Show in list ▸", () => { closeNodePopup(); document.getElementById("decisions-panel").scrollIntoView({ behavior: "smooth", block: "start" }); }],
+    };
+  }
+  return null;
+}
+
+// VADER's node terminal: a small macOS-style window next to the node. Only NEEDS ANTHONY gets a fix request.
+function openNodePopup(node, refresh) {
+  const stage = document.querySelector(".brains-stage");
+  const old = document.getElementById("ds-term");
+  const view = node && nodeView(node);
+  if (!view) { if (!refresh || old) closeNodePopup(); return; }
+  const live = node.action === "in_progress";
+  const close = el("button", { type: "button", class: "ds-tl r", "aria-label": "Close", onclick: closeNodePopup });
+  const win = el("div", {
+    class: `ds-term${node.action === "needs_anthony" ? " you" : ""}`, id: "ds-term", role: "dialog", "aria-label": `${node.kindLabel}: ${node.title}`,
+  },
+    el("div", { class: "ds-tbar" },
+      el("span", { class: "ds-tls" }, close, el("i", { class: "ds-tl y" }), el("i", { class: "ds-tl g" })),
+      el("span", { class: "ds-ttl" }, el("b", {}, node.label), ` — ${node.kindLabel}`),
+      live ? el("em", { class: "ds-live" }, "● LIVE") : null,
+    ),
+    el("div", { class: "ds-thead" },
+      el("div", { class: "ds-tl1" }, el("span", { class: `act act-${node.action}` }, ACTION_LABEL[node.action] || node.action), el("span", { class: "ds-tsum" }, node.title)),
+      el("div", { class: "ds-tl2" }, el("code", {}, view.src)),
+    ),
+    el("div", { class: "ds-stream" }, ...view.lines),
+    el("div", { class: "ds-acts" },
+      view.fix,
+      el("button", { type: "button", class: "ds-more", onclick: view.more[1] }, view.more[0]),
+    ),
+    el("div", { class: "ds-foot" }, el("span", {}, "SRC · read-only"), el("span", {}, node.id.split(":")[0].toUpperCase())),
+  );
+  if (old) old.replaceWith(win); else stage.append(win);
+  ui.openNode = node.id;
+  brains.select(node.id);
+  // Park it beside the node, on the side away from the other station, inside the stage.
+  if (!refresh || !old) {
+    const p = brains.nodePoint(node.id) || { x: stage.clientWidth / 2, y: 60, station: "claude" };
+    const w = win.offsetWidth, h = win.offsetHeight, W = stage.clientWidth, H = stage.clientHeight;
+    let x = p.station === "claude" ? p.x + 28 : p.x - 28 - w;
+    if (x + w > W - 8 || x < 8) x = Math.max(8, Math.min(W - w - 8, p.x - w / 2));
+    win.style.left = `${x}px`;
+    win.style.top = `${Math.max(8, Math.min(H - h - 8, p.y - 40))}px`;
+  } else {
+    win.style.left = old.style.left;
+    win.style.top = old.style.top;
+  }
+}
+
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.openNode) closeNodePopup(); });
 
 function startDemo() {
   // ?demo shows sample bolts so the look can be checked. They are labeled and are not real messages.
@@ -829,6 +994,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       },
     );
+    brains.onNodeClick = (node) => (node ? openNodePopup(node) : closeNodePopup());
     if (demoMode) startDemo();
   }
   connect();
