@@ -618,6 +618,26 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .for-mac { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(20, 200, 180, 0.4); }
 .for-mac-h { margin: 0 0 6px; font: 600 9.5px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: #7ff3e4; }
 
+/* ---------- the WINDOWS box between the Death Stars ---------- */
+.win-box {
+  position: absolute; left: 50%; top: 55%; transform: translateX(-50%); z-index: 2; min-width: 230px; max-width: 300px;
+  padding: 8px 12px 9px; border-radius: 8px; font: 11.5px/1.6 var(--mono); color: #dfe6ff;
+  background: rgba(10, 8, 22, 0.82); border: 1px solid rgba(167, 139, 250, 0.45);
+  box-shadow: 0 0 24px -10px rgba(167, 139, 250, 0.7); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.win-box.is-offline { border-color: rgba(229, 72, 77, 0.55); box-shadow: 0 0 24px -12px rgba(229, 72, 77, 0.7); }
+.wb-head { color: var(--dim); font-size: 10.5px; margin-bottom: 3px; white-space: nowrap; }
+.wb-head b { color: var(--windows); letter-spacing: 0.14em; }
+.wb-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-name { color: #e6e3ff; }
+.wb-st { font-weight: 700; letter-spacing: 0.06em; color: rgba(var(--wire-rgb), 0.85); }
+.wb-running, .wb-busy, .wb-starting { color: #fff; text-shadow: 0 0 8px rgba(255, 255, 255, 0.6); }
+.wb-ready, .wb-queued, .wb-waiting, .wb-pending { color: var(--windows); }
+.wb-none { color: var(--dim); }
+.wb-offline { color: var(--bad-text); font-weight: 700; letter-spacing: 0.1em; }
+.wb-why { color: var(--dim); font-weight: 400; letter-spacing: 0; }
+@media (max-width: 640px) { .win-box { position: static; transform: none; margin: 10px auto; } }
+
 /* ---------- readable reports in the job window ---------- */
 .rd {
   font: 14px/1.65 var(--ui); color: #e3eaee; overflow-wrap: anywhere;

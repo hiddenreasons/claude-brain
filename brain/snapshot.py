@@ -21,6 +21,7 @@ from .mac_runs import scan_flat_jobs, scan_job_folders
 from .machines import read_heartbeat, remote_jobs
 from .readers import FileCache, clip, iso, mtime_iso, read_tail, read_text
 from .status_files import parse_issues, parse_status
+from .windows_status import read_windows_status
 
 ONESHOT_LIMIT = 150  # newest one-shot jobs sent to the page; the total count is reported too
 ATTENTION_WINDOW_S = 72 * 3600  # older problems are history, not alerts
@@ -288,5 +289,6 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         }
         for j in snapshot["codex"]["failed"]
     ]
+    snapshot["windows_box"] = read_windows_status(cfg.runs_dir, now)
     snapshot["selfcheck"] = selfcheck.run(snapshot, cfg.status_path, cfg.runs_dir, now)
     return snapshot

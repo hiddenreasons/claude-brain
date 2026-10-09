@@ -1065,6 +1065,32 @@ function renderAudit() {
   )) : [el("li", { class: "empty" }, "Nothing recorded yet.")]));
 }
 
+// The WINDOWS box between the Death Stars: a short terminal list from windows-status.json.
+function renderWinBox() {
+  const w = snap.windows_box || {};
+  const box = document.getElementById("win-box");
+  const when = w.updated_at ? new Date(w.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never";
+  const dots = (name, width = 18) => `${name} ${".".repeat(Math.max(2, width - name.length))}`;
+  const lines = w.offline
+    ? [el("div", { class: "wb-line wb-offline" }, "offline", el("span", { class: "wb-why" }, ` · ${w.reason}`))]
+    : !w.jobs.length
+      ? [el("div", { class: "wb-line wb-none" }, "no jobs")]
+      : w.jobs.map((j) => el("div", { class: "wb-line" },
+        el("span", { class: "wb-name" }, dots(j.name)), " ",
+        el("span", { class: `wb-st wb-${j.state.toLowerCase().replace(/\s+/g, "-")}` }, j.state)));
+  box.className = `win-box${w.offline ? " is-offline" : ""}`;
+  box.replaceChildren(el("div", { class: "wb-head" }, el("b", {}, "WINDOWS"), ` · last update ${when}`), ...lines);
+  placeWinBox();
+}
+
+// Between the stations, just under the link (wide screens); below the canvas when they stack.
+function placeWinBox() {
+  const box = document.getElementById("win-box");
+  if (!brains || brains.w < 640) { box.style.removeProperty("top"); return; }
+  const st = brains.stations.mac;
+  box.style.setProperty("top", `${Math.round(st.cy + 22)}px`);
+}
+
 function renderAll() {
   if (!snap) return;
   if (window.renderHud) window.renderHud(snap);
@@ -1073,6 +1099,7 @@ function renderAll() {
   renderTerminal();
   renderSelfcheck();
   renderAudit();
+  renderWinBox();
   renderAttention();
   renderRunning();
   renderJobs();
@@ -1211,6 +1238,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("search").addEventListener("input", (ev) => { ui.query = ev.target.value.trim(); renderAll(); });
   document.getElementById("update-btn").addEventListener("click", updateNow);
   document.getElementById("mine-toggle").addEventListener("click", () => { ui.mine = !ui.mine; renderAll(); });
+  window.addEventListener("resize", () => setTimeout(placeWinBox, 50));
   document.getElementById("detail-close").addEventListener("click", () => document.getElementById("detail").close());
   if (window.BrainsVisual) {
     const motion = window.BrainsVisual.motion;
