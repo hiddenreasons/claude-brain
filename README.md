@@ -26,20 +26,16 @@ python3 -m brain --check
 
 ## What it shows
 
-At the top, Claude's brain (orange, left) and MAC's brain (blue, right). A bolt fires only when a real message passes between them:
+At the top, two Death Stars drawn on a canvas in the style of VADER's Issues tab: Grok Bot / MAC (blue, left) and Claude (orange, right).
 
-- **Blue bolt, MAC to Claude:** a new work order, a job sent, a `FROM MAC` reply.
-- **Orange bolt, Claude to MAC:** a `TO MAC` reply, a report written, a one-shot job's result.
-- **Red bolt with a white-hot core:** anything BLOCKED, or a job that errored.
-- **Faint steady arc:** a MAC job is running right now.
+- **Nodes are live items.** MAC's station: jobs MAC talked about in the last day (its own, Windows ones, and the twins of Claude's), its live work orders, and approvals waiting on Anthony. Claude's station: Claude's jobs and the work orders. The marker shows the action label: a red diamond with a dashed ring for NEEDS ANTHONY, a white ring with a running arc for IN PROGRESS, a dim ring for QUEUED, a faint dot for DONE (gone after a day).
+- **Every job has its own colour**, picked from its name, and the same colour on both stations. Hover or click a node to mark its twin and see the job's name; click to open its terminal window (only NEEDS ANTHONY gets a fix-request button).
+- **Every message fires one bolt** from the sending job's node to its twin: MAC → Claude flies left to right, replies fly back, and the receiving node glows when it lands. At most three fly at once; the rest queue. The rules are in `brain/static/volley.js` (tested by `tests/js/volley.test.js`, which pytest runs).
+- **Motion:** the switch at the top chooses Full or Calm. It starts from the system's Reduce Motion setting and remembers your choice in this browser. Calm means no bolts, just a still flash on both nodes.
 
-The brains are Codex's artwork (`brain/static/media/*-brain.png`), or Runway idle loops (`*-loop.mp4`) when present; the page falls back to drawing its own. Either side has a HUD panel: Claude's 24 h outcomes, latest jobs and a hex grid of the last 60 jobs on the left; MAC's open-order age radar, counters, 24 h traffic chart and open orders on the right. Every shape in them is real data; hover or click for the item.
+Messages that existed before the page opened don't fire. `http://localhost:8777/?demo` fires labeled sample volleys between real twin jobs for checking the look; they are not real messages.
 
-The **Motion** switch at the top chooses Full (video loops, strobing strikes, HUD animation) or Calm (still brains, single strikes). It starts from the system's Reduce Motion setting and remembers your choice in this browser.
-
-The brain loops came from Runway (Veo 3.1, first and last frame set to Codex's stills), cropped to a square and re-encoded with VADER's ffmpeg. The page crossfades each clip's end into its start. The other takes (Kling O3 Pro) and a comparison sheet are in `imagery/candidates/`, which isn't committed.
-
-Hover a bolt, or a line in "Latest messages", to see the message. Messages that existed before the page opened don't fire. `http://localhost:8777/?demo` shows labeled sample bolts for checking the look; they are not real messages.
+Under the stations, Claude's console (24 h outcomes, latest jobs, a hex grid of the last 60 jobs), the comms feed (newest first, sender tags, a status badge per message) and MAC's console (open-order age radar, counters, open orders). Every shape is real data; hover or click for the item.
 
 | Panel | Where it comes from |
 |---|---|

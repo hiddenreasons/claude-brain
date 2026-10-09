@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -37,24 +36,15 @@ STATIC_FILES = {
     "/ask.js": ("ask.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
-# Brain artwork (Codex stills, Runway loops). Optional: the page draws its own brains when these are missing.
-MEDIA_DIR = STATIC_DIR / "media"
-MEDIA_FILES = {
-    "/media/claude-brain.png": ("claude-brain.png", "image/png"),
-    "/media/mac-brain.png": ("mac-brain.png", "image/png"),
-    "/media/claude-loop.mp4": ("claude-loop.mp4", "video/mp4"),
-    "/media/mac-loop.mp4": ("mac-loop.mp4", "video/mp4"),
-}
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; "
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'none'; "
         "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
 }
 SSE_HEARTBEAT_S = 15.0
-RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 
 class BrainState:
@@ -178,13 +168,6 @@ def make_handler(state: BrainState):
             if url.path in STATIC_FILES:
                 name, content_type = STATIC_FILES[url.path]
                 self._send(HTTPStatus.OK, (STATIC_DIR / name).read_bytes(), content_type)
-            elif url.path in MEDIA_FILES:
-                name, content_type = MEDIA_FILES[url.path]
-                path = MEDIA_DIR / name
-                if path.is_file() and not path.is_symlink():
-                    self._media(path.read_bytes(), content_type)
-                else:
-                    self._error(HTTPStatus.NOT_FOUND, "not made yet")
             elif url.path == "/api/refresh":
                 # The Update button: re-read every source now instead of waiting for the next poll.
                 state.refresh(force=True)
@@ -201,34 +184,6 @@ def make_handler(state: BrainState):
                 self._events()
             else:
                 self._error(HTTPStatus.NOT_FOUND, "not found")
-
-        def _media(self, data: bytes, content_type: str) -> None:
-            """Serve artwork, honoring a single byte range: video players seek and loop with Range requests."""
-            extra = {"Cache-Control": "max-age=300", "Accept-Ranges": "bytes"}
-            match = RANGE_RE.match(self.headers.get("Range", ""))
-            if not match:
-                self._send(HTTPStatus.OK, data, content_type, extra)
-                return
-            size = len(data)
-            start_s, end_s = match.groups()
-            if start_s:
-                start = int(start_s)
-                end = min(int(end_s), size - 1) if end_s else size - 1
-            else:  # "bytes=-N": the last N bytes
-                start = max(0, size - int(end_s or 0))
-                end = size - 1
-            if start >= size or start > end:
-                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
-                self.send_header("Content-Range", f"bytes */{size}")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            self._send(
-                HTTPStatus.PARTIAL_CONTENT,
-                data[start : end + 1],
-                content_type,
-                {**extra, "Content-Range": f"bytes {start}-{end}/{size}"},
-            )
 
         def _job(self, query: Dict[str, list]) -> None:
             kind = (query.get("kind") or [""])[0]
