@@ -504,26 +504,60 @@ function clock(iso) {
     ? `${time}:${pad(d.getSeconds())}`
     : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${time}`;
 }
-const TERM_LINES = 16;
+const TERM_LINES = 40;
 const termSeen = new Set();
 let termPrimed = false;
 
-// comms.log: newest at the bottom, like tail -f. Lines that arrive while the page is open type themselves in.
+// What happened, as one small badge. Display only: read from fields the server already sends.
+function messageStatus(m) {
+  if (m.blocked && !m.cleared) return ["BLOCKED", "bad"];
+  if (m.cleared) return ["CLEARED", "good"];
+  if (m.mac_kind === "job_started") return ["STARTED", "run"];
+  if (m.mac_kind === "resolve" || m.mac_kind === "unblocked") return ["RESOLVED", "good"];
+  if (m.kind === "job_sent") return ["SENT", "open"];
+  if (m.kind === "report") return /\bDONE\b/.test(m.text) ? ["DONE", "good"] : ["REPORT", "open"];
+  if (m.kind === "work_order") return ["NEW WO", "open"];
+  if (m.kind === "job_result") return ["RESULT", "idle"];
+  return ["REPLY", "idle"];
+}
+
+const tag = (who) => el("span", { class: `tag tag-${who.toLowerCase()}` }, who);
+
+function dayLabel(iso) {
+  const d = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(Date.now() - 86400000);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+}
+
+// comms feed: newest first, grouped by day. Lines that arrive while the page is open slide in at the top.
 function renderTerminal() {
-  const timed = (snap.messages || []).filter((m) => m.at && matches(m.text, m.kind)).slice(0, TERM_LINES).reverse();
+  const timed = (snap.messages || []).filter((m) => m.at && matches(m.text, m.kind)).slice(0, TERM_LINES);
   const box = document.getElementById("messages");
-  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
-  const lines = timed.map((m) => {
+  const atTop = box.scrollTop < 24;
+  const perDay = {};
+  for (const m of timed) perDay[dayLabel(m.at)] = (perDay[dayLabel(m.at)] || 0) + 1;
+  const rows = [el("li", { class: "term-live", "aria-hidden": "true" }, "LIVE · LISTENING")];
+  let day = null;
+  for (const m of timed) {
+    const label = dayLabel(m.at);
+    if (label !== day) {
+      day = label;
+      rows.push(el("li", { class: "term-day" }, label, el("i", {}, `${perDay[label]} message${perDay[label] === 1 ? "" : "s"}`)));
+    }
     const isNew = termPrimed && !termSeen.has(m.id);
     termSeen.add(m.id);
     const open = m.blocked && !m.cleared; // a blocked report MAC resolved since is history, not an alert
-    const dirClass = open ? "blocked" : m.direction;
-    const arrow = m.direction === "to_claude" ? "MAC ▸ CLAUDE" : "CLAUDE ▸ MAC";
+    const [from, to] = m.direction === "to_claude" ? ["MAC", "CLAUDE"] : ["CLAUDE", "MAC"];
     const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
-    return el("li", {},
+    const [word, fam] = messageStatus(m);
+    const onWindows = m.machine === "windows";
+    rows.push(el("li", {},
       el("button", {
-        type: "button", class: `term-line${isNew ? " new" : ""}${m.cleared ? " cleared" : ""}`, "data-id": m.id,
-        title: `${clock(m.at)} · ${arrow} · ${kind}${open ? " · BLOCKED" : m.cleared ? " · was BLOCKED, now cleared" : ""}\n${m.text}`,
+        type: "button", class: `term-line${isNew ? " new" : ""}${m.cleared ? " cleared" : ""}${open ? " open" : ""}`, "data-id": m.id,
+        title: `${clock(m.at)} · ${from} → ${to}${onWindows ? " (on Windows)" : ""} · ${kind} · ${word}\n${m.text}`,
         onclick: () => openMessage(m),
         onmouseenter: () => brains && brains.highlight(m.id),
         onmouseleave: () => brains && brains.highlight(null),
@@ -531,20 +565,16 @@ function renderTerminal() {
         onblur: () => brains && brains.highlight(null),
       },
         el("span", { class: "term-time" }, clock(m.at)),
-        el("span", { class: `term-dir ${dirClass}` }, open ? `${arrow} ✖` : m.cleared ? `${arrow} ✔` : arrow),
-        el("span", { class: "term-txt" }, el("span", { class: "term-kind" }, `${kind.toLowerCase().replace(/ /g, "_")}:`), md(m.text)),
+        el("span", { class: "term-who" }, tag(from), el("span", { class: "arr", "aria-label": "to" }, "▸"), tag(to), onWindows ? tag("WINDOWS") : null),
+        el("span", { class: "term-txt" }, el("span", { class: "term-kind" }, kind), md(m.text)),
+        el("span", { class: "term-st" }, el("span", { class: `badge fam-${fam}` }, word)),
       )
-    );
-  });
-  termPrimed = true;
-  box.replaceChildren(
-    ...(lines.length ? lines : [el("li", { class: "term-end" }, "no messages yet")]),
-    el("li", { class: "term-end", "aria-hidden": "true" }, "listening"),
-  );
-  if (atBottom || !box.dataset.scrolled) {
-    box.scrollTop = box.scrollHeight;
-    box.dataset.scrolled = "1";
+    ));
   }
+  termPrimed = true;
+  if (!timed.length) rows.push(el("li", { class: "term-end" }, "No messages yet."));
+  box.replaceChildren(...rows);
+  if (atTop) box.scrollTop = 0;
 }
 
 // ---------- at a glance ----------
@@ -616,11 +646,11 @@ function renderHero() {
 
   if (!brains) return;
   // Orbiting labels: Claude's latest jobs, MAC's open orders. Colors are their real status.
-  const jobColor = { running: "#ffd166", waiting: "#ffd166", done: "#ffb15c", followed_up: "#50c8ff", cleared: "#5bd38a" };
+  const jobColor = { running: "#f4f7fa", waiting: "#f4f7fa", done: "#ffb15c", followed_up: "#7ff3e4", cleared: "#7ff3c4" };
   brains.setOrbits({
-    claude: allJobs().slice(0, 14).map((j) => ({ text: j.id, color: jobColor[j.state] || (/(blocked|error|stalled|gate|no_report)/.test(j.state) ? "#ff4d5e" : "#8d96a5") })),
+    claude: allJobs().slice(0, 14).map((j) => ({ text: j.id, color: jobColor[j.state] || (/(blocked|error|stalled|gate|no_report)/.test(j.state) ? "#ff6a5e" : "#80808b") })),
     mac: snap.inbox.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state)).slice(0, 14)
-      .map((e) => ({ text: e.wo !== null ? `WO#${String(e.wo).padStart(3, "0")}` : (e.date || "note").slice(5), color: e.state === "BLOCKED" ? "#ff4d5e" : "#50c8ff" })),
+      .map((e) => ({ text: e.wo !== null ? `WO#${String(e.wo).padStart(3, "0")}` : (e.date || "note").slice(5), color: e.state === "BLOCKED" ? "#ff6a5e" : "#6fd7ff" })),
   });
   // Packet flow between the brains: how busy the channel has been in the last hour.
   const hour = (snap.messages || []).filter((m) => m.at && Date.now() - Date.parse(m.at) < 3600000);

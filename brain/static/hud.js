@@ -5,10 +5,10 @@
 // Uses el(), relTime(), openDetail(), revealOrder(), allJobs() and STATE_LABELS from app.js.
 
 const HUD_COLORS = {
-  running: "#fff1a8", waiting: "#fff1a8", done: "#ffb15c", followed_up: "#50c8ff", cleared: "#5bd38a",
-  blocked: "#ff4d5e", error: "#ff4d5e", gate_failed: "#ff4d5e", stalled: "#ff4d5e", no_report: "#ff4d5e",
-  prepared: "#6b7280",
-  OPEN: "#50c8ff", RUNNING: "#fff1a8", BLOCKED: "#ff4d5e", PARKED: "#6b7280", DONE: "#46a758", NOTE: "#6b7280",
+  running: "#f4f7fa", waiting: "#f4f7fa", done: "#9fe8c4", followed_up: "#7ff3e4", cleared: "#7ff3c4",
+  blocked: "#ff7b80", error: "#ff7b80", gate_failed: "#ff7b80", stalled: "#ff7b80", no_report: "#ff7b80",
+  prepared: "#80808b",
+  OPEN: "#6fd7ff", RUNNING: "#f4f7fa", BLOCKED: "#ff7b80", PARKED: "#80808b", DONE: "#9fe8c4", NOTE: "#80808b",
 };
 const HUD_GLYPHS = {
   running: "RUN", waiting: "WAIT", done: "DONE", followed_up: "F-UP", cleared: "CLRD", blocked: "BLKD", error: "ERR",
