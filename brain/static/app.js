@@ -664,7 +664,10 @@ function renderHero() {
     if (!pulsesPrimed || before === undefined || before === sig) continue;
     const prevIndex = actions.findIndex((a) => JSON.stringify(a) + "" === before);
     const fresh = actions.slice(Math.max(prevIndex + 1, actions.length - 4));
-    fresh.forEach((a, i) => setTimeout(() => brains.pulse(a.kind === "tool" ? a.name : "thinking"), i * 300));
+    fresh.forEach((a, i) => setTimeout(() => {
+      brains.pulse(a.kind === "tool" ? a.name : "thinking");
+      brains.spark("claude", j.id); // synapse: the job's node sparks on Claude's station
+    }, i * 300));
   }
   pulsesPrimed = true;
 }
@@ -875,6 +878,12 @@ function startDemo() {
   };
   setTimeout(next, 1500);
   setInterval(next, 3200);
+  // sample synapse sparks, as if a running job were making tool calls
+  setInterval(() => {
+    const st = brains.stations[Math.random() < 0.6 ? "claude" : "mac"];
+    const live = st.nodes.filter((n) => n.key && n.action !== "done" && st.project(n.ll[0], n.ll[1])[2] > 0.2);
+    if (live.length) brains.spark(st.key, live[Math.floor(Math.random() * live.length)].key);
+  }, 650);
 }
 
 function renderAll() {

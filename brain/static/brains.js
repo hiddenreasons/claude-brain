@@ -54,6 +54,7 @@
   const hexRgb = (h) => (h ? [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) : null);
   const easeOut = (u) => 1 - Math.pow(1 - u, 3);
   const V = window.Volley;
+  const SY = window.Synapse;
   const sstep = (a, b, x) => { const u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); };
 
   // ---- 3D orientation (quaternion [w,x,y,z]); world: x right, y up, z toward the viewer ----
@@ -152,6 +153,7 @@
       this.calm = reduceMotion;
       this.stations = { claude: new Station("claude"), mac: new Station("mac") };
       this.volley = new V.Volley({ calm: reduceMotion });
+      this.sparks = new SY.Sparks({ calm: reduceMotion });
       this.keyOf = (m) => V.jobKey(m); // the page swaps in one that knows work-order numbers
       this.boltHeads = [];
       this.messages = new Map();
@@ -202,7 +204,18 @@
     fire(message) {
       if (!message) return null;
       if (message.id) this.messages.set(message.id, message);
-      return this.volley.push(message, this.keyOf(message), performance.now());
+      const key = this.keyOf(message), shot = this.volley.push(message, key, performance.now());
+      if (shot && shot.type === "bolt") this.spark(shot.from, key); // the sender's station sparks as it fires
+      return shot;
+    }
+
+    // Synapse: something happened in a job (a tool call, a log line, a message sent). A short spark runs
+    // along that station's grid from the job's node to its nearest live neighbour. Nothing with reduced motion.
+    spark(stationKey, key, red = false) {
+      const st = this.stations[stationKey];
+      if (!st || !key) return null;
+      const source = st.nodes.find((n) => n.key === key);
+      return source ? this.sparks.fire(stationKey, source, st.nodes, performance.now(), red) : null;
     }
 
     // A tool call in a running Claude job: a small ping on Claude's station.
@@ -264,7 +277,10 @@
       const dt = this.last == null ? 16 : Math.min(64, t - this.last);
       this.last = t;
       for (const st of Object.values(this.stations)) st.step(dt, this.calm);
-      this.volley.step(performance.now());
+      const now = performance.now();
+      this.volley.step(now);
+      this.sparks.step(now);
+      for (const st of Object.values(this.stations)) this.sparks.redPulse(st.key, st.nodes, now);
       if (this.visible) this.draw(t);
       requestAnimationFrame((tt) => this.frame(tt));
     }
@@ -275,7 +291,7 @@
       ctx.clearRect(0, 0, this.w, this.h);
       const flick = this.calm ? 0.95 : 0.9 + 0.06 * Math.sin(t / 97) + 0.04 * Math.sin(t / 31.7 + 1.3);
       this.drawLink(t);
-      for (const st of Object.values(this.stations)) this.drawStation(st, t, flick);
+      for (const st of Object.values(this.stations)) { this.drawStation(st, t, flick); this.drawSparks(st); }
       const focus = this.focusKey();
       for (const st of Object.values(this.stations)) this.drawNodes(st, t, focus);
       this.drawTwinLink(focus);
@@ -392,6 +408,38 @@
       ctx.font = `500 8.5px ${MONO}`; ctx.letterSpacing = "0.6px"; ctx.fillStyle = rgba(W0, 0.5);
       ctx.fillText(`VIEW ${sg(lat, 4)}° ${sg(lon, 5)}° · NODES ${st.nodes.length}`, cx, ny + 28);
       ctx.letterSpacing = "0px";
+    }
+
+    // Sparks run on the surface, just above the grid; the part round the back is hidden.
+    drawSparks(st) {
+      const ctx = this.ctx, now = performance.now();
+      for (const sp of this.sparks.active) {
+        if (sp.station !== st.key) continue;
+        const u = Math.min(1, (now - sp.t0) / this.sparks.duration), n = sp.path.length - 1;
+        const col = sp.red ? RED : hexRgb(V.jobColor(sp.key)) || st.th.node;
+        const head = u * n, tail = Math.max(0, head - n * 0.45);
+        const at = (k) => {
+          const i = Math.min(n - 1, Math.floor(k)), f = k - i, a = sp.path[i], b = sp.path[i + 1];
+          return st.project(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 1.004);
+        };
+        const steps = 10;
+        let prev = at(tail);
+        for (let j = 1; j <= steps; j++) {
+          const cur = at(tail + ((head - tail) * j) / steps);
+          if (prev[2] > 0 && cur[2] > 0) {
+            ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(cur[0], cur[1]);
+            ctx.strokeStyle = rgba(col, 0.15 + (0.85 * j) / steps); ctx.lineWidth = 0.8 + (1.4 * j) / steps; ctx.stroke();
+          }
+          prev = cur;
+        }
+        const h = at(head);
+        if (h[2] > 0) {
+          const g = ctx.createRadialGradient(h[0], h[1], 0, h[0], h[1], 6);
+          g.addColorStop(0, rgba(col, 0.6)); g.addColorStop(1, rgba(col, 0));
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(h[0], h[1], 6, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(h[0], h[1], 1.3, 0, 7); ctx.fillStyle = "rgba(255,255,255,.95)"; ctx.fill();
+        }
+      }
     }
 
     // ---------- nodes ----------
