@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Claude Brain</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/volley.js" defer></script>
   <script src="/brains.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/hud.js" defer></script>
@@ -42,9 +43,9 @@
     <h2 id="h-brains" class="visually-hidden">Claude and MAC</h2>
     <div class="brains-stage">
       <canvas id="brains-canvas" role="img"
-        aria-label="Claude's brain in orange on the left, MAC's brain in blue on the right. Lightning between them shows each message as it happens."></canvas>
-      <div class="hero-readout hero-left" id="readout-claude" aria-label="Claude right now"></div>
-      <div class="hero-readout hero-right" id="readout-mac" aria-label="MAC right now"></div>
+        aria-label="MAC's Death Star in blue on the left, Claude's in orange on the right. Each job has its own colour on both. Every message fires a bolt from the sending job to its twin on the other station."></canvas>
+      <div class="hero-readout hero-left" id="readout-mac" aria-label="MAC right now"></div>
+      <div class="hero-readout hero-right" id="readout-claude" aria-label="Claude right now"></div>
       <div class="bolt-tip" id="bolt-tip" role="tooltip" hidden></div>
     </div>
   </section>

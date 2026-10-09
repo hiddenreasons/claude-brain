@@ -142,8 +142,10 @@ strong { color: #fff; font-weight: 600; }
   border: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
   box-shadow: 0 0 24px -10px var(--c);
 }
-.hero-left { left: 16px; --c: var(--claude); }
-.hero-right { right: 16px; --c: var(--mac); text-align: left; }
+.hero-left { left: 16px; }
+.hero-right { right: 16px; text-align: left; }
+#readout-claude { --c: var(--claude); }
+#readout-mac { --c: var(--mac); }
 .ro-line { display: flex; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ro-k { color: color-mix(in srgb, var(--c) 70%, var(--dim)); min-width: 92px; letter-spacing: 0.04em; }
 .ro-v { color: #eef6fa; overflow: hidden; text-overflow: ellipsis; }

@@ -1,0 +1,106 @@
+"use strict";
+
+// Volley: which job a message is about, that job's colour, and which way its bolt flies.
+// No page code here, so Node can test it (tests/js/volley.test.js). brains.js draws what this decides.
+// Layout: MAC on the left, Claude on the right, so MAC → Claude flies left to right.
+
+(function (root) {
+  // Clearly different colours, kept away from the stations' blue (#6fd7ff) and orange (#ff9628)
+  // and from the alert red, so a job reads as itself on either station.
+  const PALETTE = ["#ff4fd8", "#b18cff", "#b6f04a", "#3fe58f", "#ff8fc7", "#e8e8ff"];
+  const BOLT_MS = 800; // one shot: 0.6 to 1 s
+  const LAND_MS = 450; // glow on the receiving node
+  const FLASH_MS = 700; // reduced motion: both nodes flash, nothing moves
+  const MAX_BOLTS = 3;
+  const GAP_MS = 160; // a beat between shots so a burst reads as a volley
+
+  function hash(text) {
+    let h = 2166136261;
+    for (const c of String(text)) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+    return h >>> 0;
+  }
+
+  // Same name, same colour, on both stations.
+  function jobColor(key) {
+    return key ? PALETTE[hash(key) % PALETTE.length] : null;
+  }
+
+  const woKey = (n) => `WO #${String(n).padStart(3, "0")}`;
+
+  // The key both stations use for a job: its id, or "WO #016" for a work order.
+  // orderNumber(id) maps an inbox entry id to its WO number (or null).
+  function jobKey(message, orderNumber) {
+    const ref = (message && message.ref) || {};
+    if (ref.source === "comms") {
+      if (ref.job) return ref.job;
+      if (ref.wo !== null && ref.wo !== undefined) return woKey(ref.wo);
+      return null;
+    }
+    if (ref.source === "job") return ref.id || null;
+    if (ref.source === "work_order") {
+      const n = orderNumber ? orderNumber(ref.id) : null;
+      return n !== null && n !== undefined ? woKey(n) : `wo:${ref.id}`;
+    }
+    return null;
+  }
+
+  // Which station sends and which receives.
+  function shot(message) {
+    const toClaude = message.direction === "to_claude";
+    return { from: toClaude ? "mac" : "claude", to: toClaude ? "claude" : "mac", dir: toClaude ? "ltr" : "rtl" };
+  }
+
+  class Volley {
+    constructor(options = {}) {
+      this.calm = !!options.calm;
+      this.max = options.max || MAX_BOLTS;
+      this.gap = options.gap === undefined ? GAP_MS : options.gap;
+      this.duration = options.duration || BOLT_MS;
+      this.queue = [];
+      this.active = [];
+      this.flashes = [];
+      this.landings = [];
+      this.seen = new Set();
+      this.lastStart = -Infinity;
+    }
+
+    // A message was logged. Each message fires once: a bolt (queued), or with reduced motion a flash.
+    push(message, key, now) {
+      if (!message || (message.id && this.seen.has(message.id))) return null;
+      if (message.id) this.seen.add(message.id);
+      const s = shot(message);
+      const color = jobColor(key);
+      if (this.calm) {
+        const flash = { type: "flash", key, color, from: s.from, to: s.to, t0: now };
+        this.flashes.push(flash);
+        return flash;
+      }
+      const bolt = { type: "bolt", message, key, color, ...s, t0: null };
+      this.queue.push(bolt);
+      return bolt;
+    }
+
+    // Advance to `now`: finished bolts land, queued ones start while fewer than `max` are in flight.
+    step(now) {
+      const still = [];
+      for (const b of this.active) {
+        if (now - b.t0 >= this.duration) this.landings.push({ key: b.key, color: b.color, station: b.to, t0: now });
+        else still.push(b);
+      }
+      this.active = still;
+      while (this.queue.length && this.active.length < this.max && now - this.lastStart >= this.gap) {
+        const b = this.queue.shift();
+        b.t0 = now;
+        this.lastStart = now;
+        this.active.push(b);
+      }
+      this.landings = this.landings.filter((l) => now - l.t0 < LAND_MS);
+      this.flashes = this.flashes.filter((f) => now - f.t0 < FLASH_MS);
+      return this.active;
+    }
+  }
+
+  const api = { PALETTE, BOLT_MS, LAND_MS, FLASH_MS, MAX_BOLTS, jobColor, jobKey, shot, woKey, Volley };
+  root.Volley = api;
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+})(typeof window !== "undefined" ? window : globalThis);

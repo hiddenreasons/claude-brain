@@ -482,8 +482,8 @@ function handleMessages(s) {
     messagesPrimed = true; // messages already there when the page opened don't fire
     return;
   }
-  // Oldest first, a beat apart, so a burst reads as separate messages.
-  fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m, i) => setTimeout(() => brains && brains.fire(m), i * 350));
+  // Oldest first; volley.js keeps at most three bolts in flight and queues the rest.
+  fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m) => brains && brains.fire(m));
 }
 
 function openMessage(m) {
@@ -675,8 +675,15 @@ const DAY = 864e5;
 const plain = (text) => String(text || "").replace(/[*`~]/g, "").replace(/\s+/g, " ").trim();
 const clipText = (text, n) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
 
-// Orange station: Claude's jobs and the work orders. Blue station: MAC's own and Windows jobs from its
-// message log, and approvals waiting on Anthony. Finished items show faint for a day, then drop off.
+// The key a job goes by on both stations: its id, or "WO #016" for a work order (volley.js).
+const orderNumber = (id) => { const e = findOrder(id); return e ? e.wo : null; };
+const messageKey = (m) => window.Volley.jobKey(m, orderNumber);
+const orderKey = (e) => (e.wo !== null ? window.Volley.woKey(e.wo) : `wo:${e.id}`);
+
+// Claude's station (orange): Claude's jobs and the work orders. MAC's station (blue): every job and work
+// order MAC has talked about in the last day (its own, Windows ones, and the twins of Claude's), plus
+// approvals waiting on Anthony. A job has the same key, place and colour on both, so twins line up.
+// Finished items show faint for a day, then drop off.
 function stationNodes() {
   const claude = [];
   let doneJobs = 0;
@@ -685,7 +692,7 @@ function stationNodes() {
     if (j.action === "done") doneJobs += 1;
     const who = j.action_who ? `${j.action_who}${j.action_at ? ` · ${relTime(j.action_at)}` : ""}` : "";
     claude.push({
-      id: `job:${j.kind}:${j.id}`, label: j.id, title: plain(j.title || j.id), action: j.action,
+      id: `job:${j.kind}:${j.id}`, key: j.id, label: j.id, title: plain(j.title || j.id), action: j.action,
       kindLabel: j.kind === "folder" ? "Claude job" : "Claude one-shot",
       sub: plain(j.action === "in_progress" ? who : j.action_note || ""), ref: { type: "job", kind: j.kind, id: j.id },
     });
@@ -693,35 +700,47 @@ function stationNodes() {
   for (const e of snap.inbox) {
     if (e.action === "done") continue;
     claude.push({
-      id: `wo:${e.id}`, label: e.wo !== null ? `WO #${String(e.wo).padStart(3, "0")}` : clipText(plain(e.title), 22),
+      id: `wo:${e.id}`, key: orderKey(e), label: e.wo !== null ? orderKey(e) : clipText(plain(e.title), 22),
       title: plain(e.title), action: e.action, kindLabel: "Work order", sub: plain(e.action_note || ""), ref: { type: "order", id: e.id },
     });
   }
 
   const mac = [];
-  const known = new Set(allJobs().map((j) => j.id));
+  const claudeAction = new Map(claude.map((n) => [n.key, n.action]));
   const running = new Set((snap.comms && snap.comms.running) || []);
-  const byJob = new Map();
+  const byKey = new Map();
   for (const m of snap.messages || []) { // newest first
-    const job = m.ref && m.ref.job;
-    if (!job || known.has(job) || !m.at) continue;
-    if (!byJob.has(job)) byJob.set(job, []);
-    byJob.get(job).push(m);
+    const key = m.at && messageKey(m);
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(m);
   }
-  for (const [job, ms] of byJob) {
+  for (const [key, ms] of byKey) {
     const last = ms[0];
-    const action = last.blocked && !last.cleared ? "needs_anthony" : running.has(job) ? "in_progress" : "done";
+    const own = last.blocked && !last.cleared ? "needs_anthony" : running.has(key) ? "in_progress" : "done";
+    const action = claudeAction.has(key) && own !== "needs_anthony" ? claudeAction.get(key) : own;
     if (action === "done" && Date.now() - Date.parse(last.at) > DAY) continue;
     const onWindows = ms.some((m) => m.machine === "windows");
     mac.push({
-      id: `comms:${job}`, label: job, title: plain(last.text), action, kindLabel: onWindows ? "Windows job" : "MAC job",
-      sub: `${onWindows ? "on Windows · " : ""}${relTime(last.at)}`, ref: { type: "comms", job },
+      id: `mac:${key}`, key, label: key, title: plain(last.text), action,
+      kindLabel: onWindows ? "Windows job" : key.startsWith("WO #") ? "MAC work order" : "MAC job",
+      sub: `${onWindows ? "on Windows · " : ""}${relTime(last.at)}`, ref: { type: "comms", key },
+    });
+  }
+  // MAC issued the work orders, so every live one sits on its station too, even when its messages are old.
+  const onMac = new Set(mac.map((n) => n.key));
+  for (const e of snap.inbox) {
+    const key = orderKey(e);
+    if (e.action === "done" || onMac.has(key) || !(e.wo !== null || e.from === "MAC")) continue;
+    mac.push({
+      id: `mac:${key}`, key, label: e.wo !== null ? key : clipText(plain(e.title), 22), title: plain(e.title), action: e.action,
+      kindLabel: "MAC work order", sub: plain(e.action_note || ""), ref: { type: "order", id: e.id },
     });
   }
   openDecisions().forEach((d) => {
     const text = plain(d);
     mac.push({
-      id: `decision:${text.slice(0, 60)}`, label: "Approval", title: text, action: "needs_anthony",
+      id: `decision:${text.slice(0, 60)}`, key: null, label: "Approval", title: text, action: "needs_anthony",
       kindLabel: "Waiting on Anthony", sub: clipText(text, 40), ref: { type: "decision", text: d },
     });
   });
@@ -772,12 +791,12 @@ function nodeView(node) {
     };
   }
   if (r.type === "comms") {
-    const ms = (snap.messages || []).filter((m) => m.ref && m.ref.job === r.job);
+    const ms = (snap.messages || []).filter((m) => messageKey(m) === r.key);
     if (!ms.length) return null;
     const lines = ms.slice(0, 5).map((m) => logLine("LOG", `${clock(m.at)} ${m.direction === "to_claude" ? "MAC → Claude" : "Claude → MAC"}${m.machine ? ` (${m.machine})` : ""}: `, md(clipText(m.text, 200))));
     return {
       src: "~/.vader-mac-runs/brain/comms.jsonl", lines,
-      fix: node.action === "needs_anthony" ? ask(() => window.askDrafts.draftForCommsJob(r.job, ms)) : null,
+      fix: node.action === "needs_anthony" ? ask(() => window.askDrafts.draftForCommsJob(r.key, ms)) : null,
       more: ["Show in comms ▸", () => { closeNodePopup(); document.getElementById("messages").scrollIntoView({ behavior: "smooth", block: "center" }); }],
     };
   }
@@ -838,21 +857,24 @@ function openNodePopup(node, refresh) {
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && ui.openNode) closeNodePopup(); });
 
 function startDemo() {
-  // ?demo shows sample bolts so the look can be checked. They are labeled and are not real messages.
+  // ?demo fires labeled sample volleys between real twin jobs so the look can be checked. Not real messages.
   document.querySelector(".brains-stage").append(el("span", { class: "preview-badge" }, "PREVIEW · SAMPLE BOLTS, NOT REAL MESSAGES"));
-  const samples = [
-    { direction: "to_claude", kind: "work_order", text: "Sample: WO #023 from MAC, rebuild the Channel page layout" },
-    { direction: "to_mac", kind: "report", text: "Sample: TO MAC: DONE. Commit 1a2b3c4 on claude/channel-layout" },
-    { direction: "to_mac", kind: "to_mac", text: "Sample: TO MAC: BLOCKED pre-commit tests fail in the sandbox", blocked: true },
-  ];
   brains.setRunning(1);
   let i = 0;
+  const shot = (key, direction, text) => brains.fire({ id: `demo-${i++}`, direction, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } });
   const next = () => {
-    brains.fire({ ...samples[i % samples.length], id: `demo-${i}` });
-    i += 1;
+    // twins facing the viewer on both stations, so the sample volley is easy to follow
+    const facing = (st) => new Set(st.nodes.filter((n) => n.key && n.action !== "done" && st.project(n.ll[0], n.ll[1])[2] > 0.2).map((n) => n.key));
+    const onMac = facing(brains.stations.mac);
+    const twins = [...facing(brains.stations.claude)].filter((k) => onMac.has(k));
+    if (!twins.length) return;
+    const key = twins[Math.floor(Math.random() * twins.length)];
+    shot(key, "to_claude", `Sample: MAC sends ${key}`);
+    setTimeout(() => shot(key, "to_mac", `Sample: Claude replies on ${key}`), 650);
+    setTimeout(() => shot(key, "to_claude", `Sample: MAC answers on ${key}`), 1300);
   };
-  next();
-  setInterval(next, 2600);
+  setTimeout(next, 1500);
+  setInterval(next, 3200);
 }
 
 function renderAll() {
@@ -995,6 +1017,7 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     );
     brains.onNodeClick = (node) => (node ? openNodePopup(node) : closeNodePopup());
+    brains.keyOf = messageKey;
     if (demoMode) startDemo();
   }
   connect();
