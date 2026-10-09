@@ -91,6 +91,11 @@ function draftForOrder(entry) {
   if (entry.status_text) lines.push(`Status line: "${quote(entry.status_text, 300)}"`);
   if (last) lines.push(`Last reply (${last.direction === "to_mac" ? "Claude to MAC" : "MAC to Claude"}): "${quote(last.text)}"`);
   lines.push("");
+  if (entry.action === "needs_anthony" && entry.state !== "BLOCKED") {
+    lines.push(`This is waiting on my decision${entry.action_note ? ` (${clean(entry.action_note)})` : ""}.`);
+    lines.push("My decision: ____", "Please pass it on and tell me when the work restarts.");
+    return { to: "mac", subject: `${entry.wo !== null ? `WO #${entry.wo}` : "Work order"}: my decision`, body: lines.join("\n") };
+  }
   if (entry.state === "BLOCKED") {
     lines.push("Claude is blocked on this and waiting on you. Please unblock it (answer, fix or decision) or tell me what you need from me.");
   } else if (entry.state === "PARKED") {

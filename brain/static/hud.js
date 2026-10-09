@@ -42,7 +42,9 @@ function tinted(node, color) {
 }
 
 function glyph(state) {
-  return tinted(el("span", { class: "hud-glyph" }, HUD_GLYPHS[state] || state), hudColor(state));
+  // Resolved and blocked glyphs are solid so they jump out; open and running stay outlined.
+  const solid = ["good", "bad"].includes(family(state)) ? " solid" : "";
+  return tinted(el("span", { class: `hud-glyph${solid}` }, HUD_GLYPHS[state] || state), hudColor(state));
 }
 
 function hudHead(title, sub) {
@@ -206,8 +208,11 @@ function jobTable(jobs) {
     el("tr", { tabindex: 0, onclick: () => openDetail(j.kind, j.id, j.title),
       onkeydown: (ev) => ev.key === "Enter" && openDetail(j.kind, j.id, j.title) },
       el("td", {}, glyph(j.state)),
-      el("td", { class: "hud-mono" }, j.id),
-      el("td", { class: "hud-desc" }, md(j.report_headline && j.kind === "folder" ? `${j.title} — ${j.report_headline}` : j.title)),
+      el("td", { class: "hud-mono" }, j.id, j.action === "needs_anthony" ? el("span", { class: "hud-needs" }, "▲") : null),
+      el("td", { class: "hud-desc" }, md(
+        j.state === "cleared" ? `${j.title} — ✔ cleared by MAC`
+          : j.state === "followed_up" ? `${j.title} — ↻ MAC handling`
+            : j.report_headline && j.kind === "folder" ? `${j.title} — ${j.report_headline}` : j.title)),
       el("td", { class: "hud-mono hud-dim" }, shortAge(j.updated_at)),
     )
   );
@@ -222,14 +227,15 @@ function orderTable(orders) {
   const rows = orders.map((e) =>
     el("tr", { tabindex: 0, onclick: () => revealOrder(e.id), onkeydown: (ev) => ev.key === "Enter" && revealOrder(e.id) },
       el("td", {}, glyph(e.state)),
-      el("td", { class: "hud-mono" }, e.wo !== null ? `#${String(e.wo).padStart(3, "0")}` : "·"),
+      el("td", { class: "hud-mono" }, e.wo !== null ? `#${String(e.wo).padStart(3, "0")}` : "·",
+        e.action === "needs_anthony" ? el("span", { class: "hud-needs" }, "▲") : null),
       el("td", { class: "hud-desc" }, md(e.title.replace(/^WO from MAC\s*#\s*\d+\s*[-—–:]\s*/, "")),
-        e.status_text ? el("span", { class: "hud-status" }, md(e.status_text)) : null),
+        el("span", { class: `hud-status act-${e.action}` }, `${ACTION_LABEL[e.action] || ""}${e.action_note ? ` · ${e.action_note}` : ""}`)),
       el("td", { class: "hud-mono hud-dim" }, e.replies.length ? `${e.replies.length}↔` : ""),
     )
   );
   return el("table", { class: "hud-table" },
-    el("caption", { class: "visually-hidden" }, "MAC's open work orders: status, number, description, replies"),
+    el("caption", { class: "visually-hidden" }, "MAC's live work orders, NEEDS ANTHONY first: status, number, description, replies"),
     el("thead", {}, el("tr", {}, el("th", {}, "ST"), el("th", {}, "WO"), el("th", {}, "ORDER / STATUS"), el("th", {}, "RE"))),
     el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: 4 }, "No open orders."))),
   );
@@ -265,7 +271,7 @@ function renderHud(s) {
         stat(count(["blocked", "error", "gate_failed", "stalled", "no_report"]), "stuck · 24 h", "blocked"),
       ),
     ),
-    el("div", { class: "hud-scroll" }, jobTable(jobs.slice(0, 9))),
+    el("div", { class: "hud-scroll" }, jobTable(byAction(jobs).slice(0, 9))),
     el("figure", { class: "hud-hexfig" }, hexGrid(jobs), el("figcaption", {}, "Last 60 jobs · one cell each · hover for detail")),
   );
 
@@ -277,12 +283,12 @@ function renderHud(s) {
     el("div", { class: "hud-row" },
       radar(open),
       el("div", { class: "hud-stats" },
-        stat(s.status.decisions.length, "waiting on Anthony", "BLOCKED"),
+        stat(openDecisions().length, "waiting on Anthony", openDecisions().length ? "BLOCKED" : "DONE"),
         stat(open.length, "open orders", "OPEN"),
         stat(blocked, "blocked orders", "BLOCKED"),
       ),
     ),
-    el("div", { class: "hud-scroll" }, orderTable(open.slice(0, 9))),
+    el("div", { class: "hud-scroll" }, orderTable(byAction(s.inbox.filter((e) => e.action !== "done")).slice(0, 9))),
   );
   document.getElementById("comms-traffic").replaceChildren(traffic(s.messages || []));
 }

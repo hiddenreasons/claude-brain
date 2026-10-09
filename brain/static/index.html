@@ -29,6 +29,14 @@
   </header>
 
   <section class="statusbar" id="statusbar" aria-label="At a glance"></section>
+  <p class="legend" aria-label="What the badges mean">
+    <span class="legend-k">legend</span>
+    <span class="act act-needs_anthony">▲ NEEDS ANTHONY</span>
+    <span class="act act-in_progress">▶ IN PROGRESS</span>
+    <span class="act act-queued">… QUEUED</span>
+    <span class="act act-done">✔ DONE</span>
+    <span>only ▲ cards get ⧉ copy fix request</span>
+  </p>
 
   <section class="hero" aria-labelledby="h-brains">
     <h2 id="h-brains" class="visually-hidden">Claude and MAC</h2>
@@ -68,10 +76,7 @@
       </section>
 
       <section aria-labelledby="h-jobs" class="panel">
-        <div class="panel-head">
-          <h2 id="h-jobs">MAC → Claude jobs <span class="count" id="jobs-count"></span></h2>
-          <div class="chips" role="group" aria-label="Filter jobs" id="job-filters"></div>
-        </div>
+        <h2 id="h-jobs">MAC → Claude jobs <span class="count" id="jobs-count"></span></h2>
         <p class="source" id="jobs-note">From ~/.vader-mac-runs</p>
         <ol class="list" id="jobs"></ol>
       </section>
@@ -85,10 +90,7 @@
       </section>
 
       <section aria-labelledby="h-orders" class="panel">
-        <div class="panel-head">
-          <h2 id="h-orders">Work orders</h2>
-          <div class="chips" role="group" aria-label="Filter work orders" id="order-filters"></div>
-        </div>
+        <h2 id="h-orders">Work orders <span class="count" id="orders-count"></span></h2>
         <p class="source">From VADER's CLAUDE INBOX.md</p>
         <ol class="list" id="orders"></ol>
       </section>

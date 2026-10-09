@@ -13,6 +13,7 @@ from .comms import TAIL_BYTES as COMMS_TAIL
 from .comms import comms_path, parse_comms
 from .config import Config
 from .inbox import parse_inbox
+from .labels import job_action, order_action
 from .mac_runs import scan_flat_jobs, scan_job_folders
 from .readers import FileCache, clip, iso, mtime_iso, read_tail, read_text
 from .status_files import parse_issues, parse_status
@@ -184,9 +185,12 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     apply_followups(folders, status.get("entries", []), comms)
     # One flag the page trusts for fix-request buttons, so the rule lives in one place.
     for job in folders + oneshots:
-        job["alertable"] = job["state"] in ALERT_STATES
+        job.update(job_action(job))
     for entry in inbox:
-        entry["alertable"] = entry["state"] in ALERT_ORDER_STATES
+        entry.update(order_action(entry))
+    # Only NEEDS ANTHONY items get a fix-request button.
+    for item in folders + oneshots + inbox:
+        item["alertable"] = item["action"] == "needs_anthony"
     return {
         "generated_at": iso(now),
         "sources": {

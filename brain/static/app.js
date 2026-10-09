@@ -5,17 +5,26 @@
 
 const STATE_LABELS = {
   running: "Running", waiting: "Waiting", done: "Done", blocked: "Blocked", error: "Error",
-  gate_failed: "Gate failed", stalled: "Stalled", no_report: "No report", followed_up: "MAC followed up", cleared: "Cleared",
+  gate_failed: "Gate failed", stalled: "Stalled", no_report: "No report", followed_up: "MAC handling", cleared: "Cleared",
   prepared: "No Claude run",
   OPEN: "Open", BLOCKED: "Blocked", PARKED: "Parked", DONE: "Done", RUNNING: "Running", NOTE: "Note",
 };
-const PROBLEM_STATES = new Set(["blocked", "error", "gate_failed", "stalled", "no_report"]);
-const JOB_FILTERS = [["all", "All"], ["live", "Running"], ["problems", "Problems"], ["done", "Done"]];
-const ORDER_FILTERS = [["active", "Open + blocked"], ["PARKED", "Parked"], ["DONE", "Done"], ["all", "All"]];
+// One action label per card, set by the server (brain/labels.py). Lists group by it, in this order.
+const ACTIONS = [
+  ["needs_anthony", "▲ NEEDS ANTHONY"],
+  ["in_progress", "▶ IN PROGRESS"],
+  ["queued", "… QUEUED"],
+  ["done", "✔ DONE"],
+];
+const ACTION_LABEL = Object.fromEntries(ACTIONS);
+const ACTION_RANK = Object.fromEntries(ACTIONS.map(([a], i) => [a, i]));
+// Stable sort: NEEDS ANTHONY first, newest-first order kept inside each group.
+const byAction = (items) => [...items].sort((a, b) => (ACTION_RANK[a.action] ?? 9) - (ACTION_RANK[b.action] ?? 9));
+const actionBadge = (action) => el("span", { class: `act act-${action}` }, ACTION_LABEL[action] || action);
 const JOB_LIST_LIMIT = 80;
 const FRESH_MS = 90_000;
 
-const ui = { jobFilter: "all", orderFilter: "active", query: "", openOrders: new Set() };
+const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false } };
 const demoMode = new URLSearchParams(location.search).has("demo");
 let snap = null;
 let firstLoad = true;
@@ -58,19 +67,67 @@ function timeEl(iso) {
 // MAC and Claude write Markdown. Show **bold** and `code` as such, built as DOM nodes (never innerHTML).
 function md(text) {
   if (!text) return [];
+  text = String(text);
   const out = [];
-  const pattern = /`([^`]+)`|\*\*([^*]+)\*\*/g;
+  const pattern = /`([^`]+)`|\*\*([^*]+)\*\*|~~([^~]+)~~/g;
   let last = 0;
-  for (const m of String(text).matchAll(pattern)) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    out.push(m[1] !== undefined ? el("code", {}, m[1]) : el("strong", {}, md(m[2])));
+  for (const m of text.matchAll(pattern)) {
+    if (m.index > last) out.push(...lightWords(text.slice(last, m.index)));
+    if (m[1] !== undefined) out.push(el("code", {}, m[1]));
+    else if (m[2] !== undefined) out.push(el("strong", {}, md(m[2])));
+    else out.push(el("s", {}, md(m[3])));
     last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(...lightWords(text.slice(last)));
+  return out;
+}
+
+// Status words light up like syntax highlighting: resolved green, blocked red, waiting amber.
+const WORD_TONES = [
+  [/\b(DONE|APPROVED|DECIDED|RESOLVED|CLEARED|MERGED|COMMITTED|PASS(?:ED)?|VERIFIED|UNBLOCKED|DROPPED|committed|merged|approved|resolved|cleared|unblocked)\b/g, "good"],
+  [/\b(BLOCKED|FAILED|FAIL|ERROR|STALLED)\b/g, "bad"],
+  [/\b(PENDING|AWAITING|WAITING|HELD|PARKED|awaiting|pending)\b/g, "warn"],
+];
+
+function lightWords(text) {
+  const hits = [];
+  for (const [re, tone] of WORD_TONES) {
+    for (const m of text.matchAll(re)) hits.push({ i: m.index, len: m[0].length, tone });
+  }
+  if (!hits.length) return [text];
+  hits.sort((a, b) => a.i - b.i);
+  const out = [];
+  let last = 0;
+  for (const h of hits) {
+    if (h.i < last) continue;
+    if (h.i > last) out.push(text.slice(last, h.i));
+    out.push(el("span", { class: `word-${h.tone}` }, text.slice(h.i, h.i + h.len)));
+    last = h.i + h.len;
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
 }
 
-const badge = (state) => el("span", { class: `badge s-${state}` }, STATE_LABELS[state] || state);
+// Every state belongs to one family; the family sets its badge and the card's tint.
+const FAMILY = {
+  done: "good", DONE: "good", cleared: "good",
+  followed_up: "handled",
+  running: "run", waiting: "run", RUNNING: "run",
+  OPEN: "open",
+  blocked: "bad", error: "bad", gate_failed: "bad", stalled: "bad", no_report: "bad", BLOCKED: "bad",
+  prepared: "idle", PARKED: "idle", NOTE: "idle",
+};
+const family = (state) => FAMILY[state] || "idle";
+
+// STATUS.md decisions: "~~Push/merge X~~ DONE 09:00 …" is settled; anything else still needs Anthony.
+const SETTLED_RE = /^~~[\s\S]+?~~\s*(DONE|DECIDED|APPROVED|DROPPED|RESOLVED|MERGED|CANCELLED|CANCELED)\b/i;
+function decisionState(text) {
+  const m = SETTLED_RE.exec(text.trim());
+  return m ? { settled: true, word: m[1].toUpperCase() } : { settled: false, word: "NEEDS YOU" };
+}
+const openDecisions = () => snap.status.decisions.filter((d) => !decisionState(d).settled);
+
+const badge = (state) => el("span", { class: `badge s-${state} fam-${family(state)}` }, STATE_LABELS[state] || state);
 const money = (usd) => (typeof usd === "number" ? `$${usd.toFixed(2)} list-price est.` : null);
 const minutes = (s) => (typeof s === "number" ? (s < 90 ? `${s}s` : `${Math.round(s / 60)} min`) : null);
 
@@ -99,17 +156,6 @@ function empty(text) {
   return el("p", { class: "empty" }, text);
 }
 
-function filterChips(container, options, current, onPick) {
-  container.replaceChildren(
-    ...options.map(([value, label]) =>
-      el("button", {
-        type: "button", class: "chip", "aria-pressed": String(value === current),
-        onclick: () => onPick(value),
-      }, label)
-    )
-  );
-}
-
 // ---------- jobs ----------
 
 function jobKey(job) { return `${job.kind}:${job.id}`; }
@@ -133,13 +179,19 @@ function jobMeta(job) {
 function jobLine(job) {
   if (job.kind === "folder") {
     const lines = [];
+    const resolved = job.state === "followed_up" || job.state === "cleared";
+    if (resolved) {
+      const where = String(job.followed_up_by || "").startsWith("STATUS.md") ? "MAC's change log"
+        : String(job.followed_up_by || "").startsWith("MAC (comms") ? "MAC's message log" : job.followed_up_by;
+      lines.push(el("p", { class: `resolution ${job.state}`, title: job.followed_up_by || "" },
+        job.state === "cleared" ? "✔ Cleared by MAC" : "↻ MAC is handling it",
+        ` · ${where}`, job.followed_up_at ? ` · ${relTime(job.followed_up_at)}` : ""));
+    }
     if (job.report_headline) {
       const from = job.headline_source === "final reply" ? "Final reply: " : "";
-      lines.push(el("p", { class: "line" }, from, md(job.report_headline)));
-    }
-    if (job.state === "followed_up" || job.state === "cleared") {
-      lines.push(el("p", { class: "line muted" },
-        job.state === "cleared" ? `Cleared (${job.followed_up_by}` : `MAC acted after the report (${job.followed_up_by}`, job.followed_up_at ? `, ${relTime(job.followed_up_at)}` : "", ")"));
+      // Once resolved, the old report is history: one dim line.
+      lines.push(el("p", { class: resolved ? "line was" : "line", title: resolved ? job.report_headline : null },
+        resolved ? "was: " : from, md(job.report_headline)));
     }
     return lines;
   }
@@ -166,11 +218,12 @@ function withAsk(card, askBtn) {
 
 function jobCard(job) {
   const card = el("button", {
-    type: "button", class: `card${isFresh(jobKey(job)) ? " fresh" : ""}`, "data-key": jobKey(job),
+    type: "button", class: `card tone-${family(job.state)}${isFresh(jobKey(job)) ? " fresh" : ""}`, "data-key": jobKey(job),
     onclick: () => openDetail(job.kind, job.id, job.title),
   },
-    el("div", { class: "card-top" }, badge(job.state), el("span", { class: "card-title" }, md(job.title || job.id))),
+    el("div", { class: "card-top" }, actionBadge(job.action), el("span", { class: "card-title" }, md(job.title || job.id))),
     jobMeta(job),
+    actionLine(job),
     jobLine(job),
   );
   const askBtn = job.alertable
@@ -192,24 +245,62 @@ function allJobs() {
   return [...snap.folders, ...snap.oneshots].sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
 }
 
-function jobPassesFilter(job) {
-  if (ui.jobFilter === "live") return job.state === "running" || job.state === "waiting";
-  if (ui.jobFilter === "problems") return PROBLEM_STATES.has(job.state);
-  if (ui.jobFilter === "done") return ["done", "followed_up", "cleared"].includes(job.state);
-  return true;
+// The short "what's happening" line under each card's title: why it needs Anthony, who is on it and
+// when its log last moved, or what it's queued behind.
+function actionLine(item) {
+  // A job's own line below already shows its note or report headline; don't say it twice.
+  const shownBelow = item.kind && [item.note, item.report_headline].includes(item.action_note);
+  if (item.action === "needs_anthony" && item.action_note && !shownBelow) {
+    return el("p", { class: "action-line needs" }, md(item.action_note));
+  }
+  if (item.action === "in_progress") {
+    return el("p", { class: "action-line progress" },
+      item.action_who ? `${item.action_who}` : "on it",
+      item.action_at ? ` · log moved ${relTime(item.action_at)}` : "",
+      item.action_note && item.action_who !== "Claude (one-shot)" && !item.kind ? ` · ${item.action_note}` : "");
+  }
+  if (item.action === "queued" && item.action_note) {
+    return el("p", { class: "action-line queued" }, "waiting: ", md(item.action_note));
+  }
+  return null;
+}
+
+// Live groups first (NEEDS ANTHONY on top), then a collapsed Done section.
+function groupedList(listId, items, cardFn, which) {
+  const groups = Object.fromEntries(ACTIONS.map(([a]) => [a, []]));
+  for (const item of items) (groups[item.action] || groups.queued).push(item);
+  const nodes = [];
+  for (const [action, title] of ACTIONS.slice(0, 3)) {
+    if (!groups[action].length) continue;
+    nodes.push(el("li", { class: `group-h act-${action}` }, el("span", {}, title), el("span", { class: "group-n" }, String(groups[action].length))));
+    nodes.push(...groups[action].map(cardFn));
+  }
+  if (!nodes.length) nodes.push(el("li", { class: "group-h" }, empty("Nothing live right now.")));
+  const done = groups.done;
+  if (done.length) {
+    const shown = done.slice(0, JOB_LIST_LIMIT);
+    const box = el("details", {
+      class: "done-group", open: ui.doneOpen[which],
+      ontoggle: (ev) => { ui.doneOpen[which] = ev.target.open; },
+    },
+      el("summary", {}, el("span", { class: "act act-done" }, "✔ DONE"), ` ${done.length}`,
+        done.length > shown.length ? ` · newest ${shown.length} listed` : "", el("span", { class: "group-hint" }, " · click to open")),
+      el("ol", { class: "list" }, shown.map(cardFn)),
+    );
+    nodes.push(el("li", { class: "group-done" }, box));
+  }
+  document.getElementById(listId).replaceChildren(...nodes);
+  return groups;
 }
 
 function renderJobs() {
-  filterChips(document.getElementById("job-filters"), JOB_FILTERS, ui.jobFilter, (v) => { ui.jobFilter = v; renderJobs(); });
-  const jobs = allJobs().filter(jobPassesFilter).filter((j) => matches(j.title, j.id, j.report_headline, j.result_preview, j.prompt_preview));
-  const shown = jobs.slice(0, JOB_LIST_LIMIT);
+  const jobs = allJobs().filter((j) => matches(j.title, j.id, j.report_headline, j.result_preview, j.prompt_preview));
+  const groups = groupedList("jobs", jobs, jobCard, "jobs");
+  const live = jobs.length - groups.done.length;
+  document.getElementById("jobs-count").textContent = `${live} live · ${groups.done.length} done`;
   const total = snap.oneshot_total + snap.folders.length;
-  document.getElementById("jobs-count").textContent =
-    jobs.length > shown.length ? `showing ${shown.length} of ${jobs.length}` : String(jobs.length);
   document.getElementById("jobs-note").textContent =
-    `${total} jobs on record. The newest ${JOB_LIST_LIMIT} are listed; search covers the newest ${snap.oneshots.length + snap.folders.length}.`;
-  const list = document.getElementById("jobs");
-  list.replaceChildren(...(shown.length ? shown.map(jobCard) : [el("li", {}, empty("No jobs match."))]));
+    `${total} jobs on record; the newest ${snap.oneshots.length + snap.folders.length} are here.`;
 }
 
 function renderRunning() {
@@ -259,12 +350,15 @@ function renderAttention() {
   document.title = items.length ? `(${items.length}) Claude Brain` : "Claude Brain";
   const box = document.getElementById("attention");
   if (!items.length) {
-    box.replaceChildren(empty("Nothing stuck. No blocked work orders, failed gates, stalled or errored jobs in the last 3 days."));
+    const older = [...allJobs(), ...snap.inbox].filter((i) => i.action === "needs_anthony").length;
+    box.replaceChildren(empty(older
+      ? `Nothing new in the last 3 days. ${older} older item${older === 1 ? "" : "s"} still marked ▲ NEEDS ANTHONY in the lists below.`
+      : "Nothing stuck. No blocked work orders, failed gates, stalled or errored jobs in the last 3 days."));
     return;
   }
   box.replaceChildren(el("ol", { class: "list" }, items.map((a) => {
     const card = el("button", {
-      type: "button", class: "card",
+      type: "button", class: `card tone-${family(a.state)}`,
       onclick: () => (a.source === "job" ? openDetail(a.kind, a.id, a.title) : revealOrder(a.id)),
     },
       el("div", { class: "card-top" }, badge(a.state), el("span", { class: "card-title" }, md(a.title))),
@@ -279,37 +373,37 @@ function renderAttention() {
 }
 
 function renderDecisions() {
-  const items = snap.status.decisions.filter((d) => matches(d));
-  document.getElementById("decisions-count").textContent = items.length || "";
+  const items = snap.status.decisions.filter((d) => matches(d)).map((d) => ({ d, ...decisionState(d) }));
+  items.sort((a, b) => Number(a.settled) - Number(b.settled));
+  const open = items.filter((i) => !i.settled).length;
+  document.getElementById("decisions-count").textContent = open ? String(open) : "";
   const list = document.getElementById("decisions");
   list.replaceChildren(...(items.length
-    ? items.map((d) => el("li", {}, md(d), " ",
-      /^~~.*~~\s*DONE/i.test(d) ? null : ask(() => window.askDrafts.draftForDecision(d), "Copy my decision")))
+    ? items.map((i) => el("li", { class: i.settled ? "decision settled" : "decision open", title: i.settled ? i.d : null },
+      el("span", { class: `badge ${i.settled ? "fam-good" : "fam-open"}` }, i.word), " ",
+      md(i.d),
+      i.settled ? null : el("span", {}, " ", ask(() => window.askDrafts.draftForDecision(i.d), "Copy my decision"))))
     : [el("li", { class: "empty" }, "Nothing listed.")]));
-}
-
-function orderPassesFilter(entry) {
-  if (ui.orderFilter === "active") return ["OPEN", "BLOCKED", "RUNNING"].includes(entry.state);
-  if (ui.orderFilter === "all") return true;
-  return entry.state === ui.orderFilter;
 }
 
 function orderCard(entry) {
   const key = `wo:${entry.id}`;
   const details = el("details", {
-    class: `card${isFresh(key) ? " fresh" : ""}`, "data-key": key, id: `order-${entry.id}`,
+    class: `card tone-${family(entry.state)}${isFresh(key) ? " fresh" : ""}`, "data-key": key, id: `order-${entry.id}`,
     open: ui.openOrders.has(entry.id),
     ontoggle: (ev) => (ev.target.open ? ui.openOrders.add(entry.id) : ui.openOrders.delete(entry.id)),
   },
     el("summary", {},
-      el("div", { class: "card-top" }, badge(entry.state), el("span", { class: "card-title" }, md(entry.title))),
+      el("div", { class: "card-top" }, actionBadge(entry.action), el("span", { class: "card-title" }, md(entry.title))),
       el("div", { class: "meta" },
+        el("span", {}, `state: ${entry.state.toLowerCase()}`),
         entry.date && el("span", {}, entry.date),
         entry.wo !== null && el("span", {}, `WO #${entry.wo}`),
         entry.from && el("span", {}, `from ${entry.from}`),
         entry.replies.length ? el("span", {}, `${entry.replies.length} replies`) : null,
       ),
-      entry.status_text ? el("p", { class: "line muted" }, md(entry.status_text)) : null,
+      actionLine(entry),
+      entry.status_text && entry.action !== "in_progress" ? el("p", { class: "line muted" }, md(entry.status_text)) : null,
     ),
   );
   if (entry.replies.length) {
@@ -328,16 +422,14 @@ function orderCard(entry) {
 }
 
 function renderOrders() {
-  filterChips(document.getElementById("order-filters"), ORDER_FILTERS, ui.orderFilter, (v) => { ui.orderFilter = v; renderOrders(); });
-  const entries = snap.inbox.filter(orderPassesFilter).filter((e) =>
-    matches(e.title, e.status_text, e.body, ...e.replies.map((r) => r.text))
-  );
-  const list = document.getElementById("orders");
-  list.replaceChildren(...(entries.length ? entries.map(orderCard) : [el("li", {}, empty("No work orders match."))]));
+  const entries = snap.inbox.filter((e) => matches(e.title, e.status_text, e.body, ...e.replies.map((r) => r.text)));
+  const groups = groupedList("orders", entries, orderCard, "orders");
+  document.getElementById("orders-count").textContent = `${entries.length - groups.done.length} live · ${groups.done.length} done`;
 }
 
 function revealOrder(id) {
-  ui.orderFilter = "all";
+  const entry = findOrder(id);
+  if (entry && entry.action === "done") ui.doneOpen.orders = true;
   ui.openOrders.add(id);
   renderOrders();
   const node = document.getElementById(`order-${id}`);
@@ -429,7 +521,7 @@ function renderTerminal() {
     const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
     return el("li", {},
       el("button", {
-        type: "button", class: `term-line${isNew ? " new" : ""}`, "data-id": m.id,
+        type: "button", class: `term-line${isNew ? " new" : ""}${m.cleared ? " cleared" : ""}`, "data-id": m.id,
         title: `${clock(m.at)} · ${arrow} · ${kind}${open ? " · BLOCKED" : m.cleared ? " · was BLOCKED, now cleared" : ""}\n${m.text}`,
         onclick: () => openMessage(m),
         onmouseenter: () => brains && brains.highlight(m.id),
@@ -439,7 +531,7 @@ function renderTerminal() {
       },
         el("span", { class: "term-time" }, clock(m.at)),
         el("span", { class: `term-dir ${dirClass}` }, open ? `${arrow} ✖` : m.cleared ? `${arrow} ✔` : arrow),
-        el("span", { class: "term-txt" }, el("span", { class: "term-kind" }, `${kind.toLowerCase().replace(/ /g, "_")}:`), m.text),
+        el("span", { class: "term-txt" }, el("span", { class: "term-kind" }, `${kind.toLowerCase().replace(/ /g, "_")}:`), md(m.text)),
       )
     );
   });
@@ -481,7 +573,9 @@ function renderStatus() {
     : elsewhere.length ? `elsewhere: ${elsewhere.join(", ")}` : "nothing running";
   document.getElementById("statusbar").replaceChildren(
     statTile("running", running.length + elsewhere.length, runText, "var(--running)", "running-panel"),
-    statTile("needs_you", snap.status.decisions.length, "decisions in MAC's STATUS.md", "var(--mac)", "decisions-panel"),
+    statTile("needs_you", openDecisions().length,
+      `${openDecisions().length} open · ${snap.status.decisions.length - openDecisions().length} settled in MAC's STATUS.md`,
+      openDecisions().length ? "var(--mac)" : "var(--done)", "decisions-panel"),
     statTile("stuck", stuck, stuck ? snap.attention[0].title : "nothing blocked or failing", stuck ? "var(--accent)" : "var(--done)", "attention-panel"),
     statTile("msgs_24h", day.length, `${toClaude} MAC→Claude · ${day.length - toClaude} Claude→MAC`, "var(--claude)", "messages"),
     statTile("last_msg", last ? relTime(last.at).replace(" ago", "") : "—",
@@ -516,7 +610,7 @@ function renderHero() {
     readoutLine("mac.state", macActive ? "SENDING" : "QUIET", macActive ? "hot" : ""),
     readoutLine("mac.last_sent", lastToClaude ? relTime(lastToClaude.at) : "—"),
     readoutLine("orders.open", String(open)),
-    readoutLine("needs.anthony", String(snap.status.decisions.length), snap.status.decisions.length ? "bad" : "ok"),
+    readoutLine("needs.anthony", String(openDecisions().length), openDecisions().length ? "bad" : "ok"),
   );
 
   if (!brains) return;

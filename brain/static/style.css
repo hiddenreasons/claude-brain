@@ -326,6 +326,68 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
   background: #030407; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; margin: 0; max-height: 50vh; overflow: auto;
 }
 
+/* ---------- status at a glance: one family per meaning ---------- */
+/* Resolved and blocked are SOLID so they jump out; running, open and idle stay outlined. */
+.badge.fam-good { background: var(--done); color: #03120a; border-color: var(--done); box-shadow: 0 0 12px rgba(91, 211, 138, 0.55); }
+.badge.fam-bad { background: var(--accent); color: #1c0306; border-color: var(--accent); box-shadow: 0 0 12px rgba(255, 77, 94, 0.5); }
+.badge.fam-run { color: var(--running); }
+.badge.fam-open, .badge.fam-handled { color: var(--mac); }
+.badge.fam-idle { color: var(--neutral); }
+.badge[class*="fam-"]::after { content: ""; }
+.badge.fam-good::before { content: "✔ "; }
+.badge.fam-bad::before { content: "✖ "; }
+.badge.fam-run::before { content: "● "; }
+.badge.fam-open::before { content: "○ "; }
+.badge.fam-handled::before { content: "↻ "; }
+.badge.fam-idle::before { content: "· "; }
+
+.card.tone-good { border-left: 3px solid var(--done); background: linear-gradient(90deg, rgba(91, 211, 138, 0.11), var(--panel-2) 45%); }
+.card.tone-bad { border-left: 3px solid var(--accent); background: linear-gradient(90deg, rgba(255, 77, 94, 0.13), var(--panel-2) 45%); }
+.card.tone-run { border-left: 3px solid var(--running); }
+.card.tone-open, .card.tone-handled { border-left: 3px solid var(--mac); }
+.card.tone-idle { border-left: 3px solid var(--line-2); }
+
+.word-good { color: var(--done); font-weight: 700; }
+.word-bad { color: var(--accent); font-weight: 700; }
+.word-warn { color: var(--running); }
+s { color: var(--muted); text-decoration-color: rgba(255, 255, 255, 0.35); }
+
+.resolution { margin: 6px 0 0; font-weight: 700; }
+.resolution.cleared { color: var(--done); }
+.resolution.followed_up { color: var(--mac); }
+.line.was .word-good, .line.was .word-bad, .term-line.cleared .word-bad { color: inherit; font-weight: inherit; }
+.line.was { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .line:not(.was) { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.bullets li.decision { padding: 6px 10px; border-left: 3px solid; }
+.bullets li.decision::before { content: none; }
+.decision.open { border-color: var(--mac); background: rgba(80, 200, 255, 0.06); }
+.decision.settled { border-color: var(--done); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.decision .badge { margin-right: 4px; }
+
+.hud-glyph.solid { background: var(--c); color: #04060a; box-shadow: 0 0 8px color-mix(in srgb, var(--c) 60%, transparent); }
+
+.legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 8px 20px 0; font-size: 11.5px; color: var(--muted); }
+.legend-k::before { content: "$ "; color: var(--done); }
+
+/* ---------- every panel is a terminal window ---------- */
+.panel { position: relative; padding: 0 0 12px; overflow: hidden; background: #07090d; }
+.panel::before {
+  content: ""; position: absolute; top: 12px; left: 14px; width: 34px; height: 8px; pointer-events: none;
+  background:
+    radial-gradient(circle at 4px 4px, #ff5f57 3px, transparent 3.5px),
+    radial-gradient(circle at 17px 4px, #febc2e 3px, transparent 3.5px),
+    radial-gradient(circle at 30px 4px, #28c840 3px, transparent 3.5px);
+}
+.panel > h2, .panel > .panel-head {
+  margin: 0 0 10px; padding: 6px 14px 6px 60px; min-height: 32px; display: flex; align-items: center;
+  background: #0d1016; border-bottom: 1px solid var(--line);
+}
+.panel > .panel-head h2 { margin: 0; }
+.panel > .panel-head { justify-content: space-between; }
+.panel > :not(h2):not(.panel-head) { margin-left: 14px; margin-right: 14px; }
+.panel h2::before { content: "❯"; color: var(--done); margin-right: 8px; }
+
 /* ---------- copy a fix request ---------- */
 .card-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; }
 .card-wrap > .card { align-self: stretch; }
@@ -377,3 +439,49 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
   .term-line { grid-template-columns: 86px minmax(0, 1fr); }
   .term-dir { display: none; }
 }
+
+/* ---------- action labels: one per card (brain/labels.py) ---------- */
+.act {
+  display: inline-block; flex: none; padding: 1px 7px; border: 1px solid var(--line-2); border-radius: 3px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; white-space: nowrap;
+}
+.act-needs_anthony { background: var(--accent); border-color: var(--accent); color: #1c0306; box-shadow: 0 0 14px rgba(255, 77, 94, 0.55); }
+.act-in_progress { color: var(--running); border-color: rgba(255, 209, 102, 0.45); }
+.act-queued { color: var(--muted); border-color: var(--line); opacity: 0.85; }
+.act-done { color: var(--done); border-color: rgba(91, 211, 138, 0.45); }
+
+.action-line { margin: 4px 0 0; font-size: 12px; }
+.action-line.needs { color: #ffb3bb; }
+.action-line.needs::before { content: "! "; color: var(--accent); font-weight: 700; }
+.action-line.progress { color: var(--running); }
+.action-line.progress::before { content: "▶ "; }
+.action-line.queued { color: var(--muted); }
+
+/* Group headings inside the job and work-order lists. */
+.list > li.group-h, .list > li.group-done { display: flex; counter-increment: none; grid-template-columns: none; }
+.list > li.group-h::before, .list > li.group-done::before { content: none; }
+.list > li.group-h {
+  align-items: center; gap: 8px; margin-top: 8px; padding-bottom: 3px; border-bottom: 1px dashed var(--line-2);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+}
+.list > li.group-h:first-child { margin-top: 0; }
+.group-h.act-needs_anthony { background: none; border-color: transparent; border-bottom-color: var(--accent); box-shadow: none; color: var(--accent); }
+.group-h.act-in_progress { border-top: 0; border-left: 0; border-right: 0; }
+.group-h.act-queued { border-top: 0; border-left: 0; border-right: 0; opacity: 1; }
+.group-n { color: var(--muted); font-weight: 400; }
+.group-n::before { content: "("; } .group-n::after { content: ")"; }
+.list > li.group-done { display: block; margin-top: 10px; }
+.done-group > summary { cursor: pointer; color: var(--muted); padding: 4px 0; border-top: 1px dashed var(--line-2); }
+.done-group > summary:hover { color: var(--text); }
+.done-group[open] > summary .group-hint { display: none; }
+.group-hint { opacity: 0.6; }
+.done-group > .list { margin-top: 6px; opacity: 0.8; }
+
+/* Queued cards sit back; NEEDS ANTHONY cards stand out. */
+.list > li:has(.act-queued) .card { opacity: 0.72; }
+.list > li:has(.card .act-needs_anthony) .card { border-color: rgba(255, 77, 94, 0.6); }
+.hud-needs { color: var(--accent); margin-left: 4px; font-weight: 700; }
+.hud-status.act-needs_anthony { background: none; box-shadow: none; border: 0; color: #ffb3bb; padding: 0; }
+.hud-status.act-in_progress { border: 0; padding: 0; }
+.hud-status.act-queued { border: 0; padding: 0; }
+.legend .act { font-size: 10px; }
