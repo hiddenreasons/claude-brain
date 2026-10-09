@@ -14,6 +14,8 @@ cd ~/Documents/"Active Projects"/"Claude Brain" && python3 -m brain
 
 Then open http://localhost:8777. Stop it with Ctrl+C.
 
+**Runs by itself:** a login item (`~/Library/LaunchAgents/com.anthony.claude-brain.plist`) starts the Brain at login through a small background app, `~/Applications/Claude Brain Server.app` (the app is what holds macOS's permission to read Documents), and restarts it within seconds if it stops. Its log is `~/Library/Logs/claude-brain.log`. To turn it off: `launchctl bootout gui/$(id -u)/com.anthony.claude-brain`, then delete those two files. While it runs, don't also start `python3 -m brain` by hand: the port is taken.
+
 No install step: it uses only Python's standard library (Python 3.9 or newer; the Mac's built-in `python3` works).
 
 Quick check without the web page:
