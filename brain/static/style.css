@@ -582,6 +582,32 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .decision.mac { border-color: var(--mac-teal); background: linear-gradient(90deg, rgba(20, 200, 180, 0.08), transparent); }
 .via { color: #7ff3e4; font: 600 11px var(--mono); white-space: nowrap; }
 
+/* ---------- foundation: self-check, next / proof / drift, audit ---------- */
+.selfcheck { margin: 12px 20px 0; padding: 7px 12px; border-radius: 8px; font: 12px/1.4 var(--mono); cursor: help; }
+.selfcheck b { letter-spacing: 0.12em; margin-right: 6px; }
+.selfcheck.ok { color: var(--done); background: rgba(80, 220, 160, 0.08); border: 1px solid rgba(80, 220, 160, 0.4); }
+.selfcheck.bad { color: #ffb3ad; background: rgba(229, 72, 77, 0.1); border: 1px solid rgba(229, 72, 77, 0.55); }
+.fnd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font: 10.5px/1.4 var(--mono); }
+.nx { padding: 2px 6px; border-radius: 3px; border: 1px solid rgba(var(--wire-rgb), 0.35); color: var(--wire); letter-spacing: 0.04em; }
+.nx-anthony { color: #fff; background: rgba(225, 6, 0, 0.55); border-color: var(--you); }
+.nx-mac { color: #7ff3e4; border-color: rgba(20, 200, 180, 0.5); }
+.nx-claude { color: var(--claude); border-color: rgba(255, 150, 40, 0.5); }
+.nx-windows { color: var(--windows); border-color: rgba(167, 139, 250, 0.5); }
+.nx-codex { color: #fff07a; border-color: rgba(255, 240, 122, 0.5); }
+.proof { color: var(--done-2); }
+.unverified { color: var(--help); border: 1px solid rgba(255, 181, 71, 0.55); border-radius: 3px; padding: 2px 6px; letter-spacing: 0.08em; font-weight: 700; }
+.drift { color: #1a1000; background: var(--help); border-radius: 3px; padding: 2px 6px; font-weight: 700; letter-spacing: 0.1em; }
+.drift-why, .life-why { color: var(--muted); }
+.audit { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; font: 11px/1.45 var(--mono); }
+.audit li { display: grid; grid-template-columns: 62px 70px 110px minmax(0, 1fr) auto; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(var(--wire-rgb), 0.08); }
+.a-time { color: rgba(var(--wire-rgb), 0.7); }
+.a-ev { text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--wire); }
+.a-alert { color: var(--bad-text); } .a-clear { color: var(--done); } .a-decision { color: #7ff3e4; } .a-bug { color: var(--help); }
+.a-job { color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-change { color: #cfdde4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-who { color: var(--dim); white-space: nowrap; }
+@media (max-width: 760px) { .selfcheck { margin-left: 16px; margin-right: 16px; } .audit li { grid-template-columns: 56px 1fr; } }
+
 /* ---------- readable reports in the job window ---------- */
 .rd {
   font: 14px/1.65 var(--ui); color: #e3eaee; overflow-wrap: anywhere;

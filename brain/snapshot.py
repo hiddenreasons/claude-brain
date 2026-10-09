@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import gitread
+from . import foundation, gitread, selfcheck
 from .comms import TAIL_BYTES as COMMS_TAIL
 from .comms import comms_path, parse_comms
 from .config import Config
@@ -247,7 +247,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     # Only NEEDS ANTHONY items get a fix-request button.
     for item in folders + oneshots + inbox:
         item["alertable"] = item["action"] == "needs_anthony"
-    return {
+    snapshot = {
         "generated_at": iso(now),
         "sources": {
             "inbox": _source(cfg.inbox_path),
@@ -268,3 +268,9 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         "issues": issues,
         "_comms": (comms, comms_skipped),  # internal: the server reuses it, never sent to the page
     }
+    # One lifecycle, proof, who's up next and drift for every item; then the self-check line.
+    snapshot["foundation"] = foundation.apply(snapshot, comms)
+    for job in folders:
+        job.pop("report_head", None)
+    snapshot["selfcheck"] = selfcheck.run(snapshot, cfg.status_path, cfg.runs_dir, now)
+    return snapshot

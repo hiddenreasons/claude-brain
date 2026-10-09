@@ -24,7 +24,22 @@ const actionBadge = (action) => el("span", { class: `act act-${action}` }, ACTIO
 const JOB_LIST_LIMIT = 80;
 const FRESH_MS = 90_000;
 
-const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false }, openNode: null };
+const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false }, openNode: null, mine: false };
+
+// "Only mine": Anthony's view shows only items where he is up next (brain/foundation.py).
+const mineOnly = (item) => !ui.mine || (item && item.up_next === "Anthony");
+
+// Next / proof / drift for one job or work order: who acts next, the proof behind a DONE, and any
+// disagreement between STATUS.md, REPORT.md and git.
+function foundationLine(item) {
+  const bits = [];
+  if (item.up_next) bits.push(el("span", { class: `nx nx-${item.up_next.toLowerCase()}`, title: "Who's up next" }, `Next: ${item.up_next}`));
+  if (item.proof) bits.push(el("span", { class: "proof", title: "Proof behind DONE" }, `✔ ${item.proof.kind} ${item.proof.text}`));
+  else if (item.verified === false) bits.push(el("span", { class: "unverified", title: "DONE without a commit, test result or file path" }, "UNVERIFIED"));
+  for (const why of item.drift || []) bits.push(el("span", { class: "drift", title: why }, "DRIFT"), el("span", { class: "drift-why" }, why));
+  if (item.lifecycle_why && item.lifecycle !== "running") bits.push(el("span", { class: "life-why" }, item.lifecycle_why));
+  return bits.length ? el("div", { class: "fnd" }, bits) : null;
+}
 const demoMode = new URLSearchParams(location.search).has("demo");
 let snap = null;
 let firstLoad = true;
@@ -225,6 +240,7 @@ function jobCard(job) {
   },
     el("div", { class: "card-top" }, actionBadge(job.action), el("span", { class: "card-title" }, md(job.title || job.id))),
     jobMeta(job),
+    foundationLine(job),
     actionLine(job),
     jobLine(job),
   );
@@ -296,7 +312,7 @@ function groupedList(listId, items, cardFn, which) {
 }
 
 function renderJobs() {
-  const jobs = allJobs().filter((j) => matches(j.title, j.id, j.report_headline, j.result_preview, j.prompt_preview));
+  const jobs = allJobs().filter((j) => mineOnly(j) && matches(j.title, j.id, j.report_headline, j.result_preview, j.prompt_preview));
   const groups = groupedList("jobs", jobs, jobCard, "jobs");
   const live = jobs.length - groups.done.length;
   document.getElementById("jobs-count").textContent = `${live} live · ${groups.done.length} done`;
@@ -368,7 +384,7 @@ const elapsed = (iso) => {
 };
 
 function renderRunning() {
-  const rows = activeRows().filter((r) => matches(r.job, r.title, r.doing));
+  const rows = ui.mine ? [] : activeRows().filter((r) => matches(r.job, r.title, r.doing));
   document.getElementById("running-count").textContent = rows.length || "";
   const box = document.getElementById("running");
   if (!rows.length) {
@@ -402,7 +418,8 @@ function renderRunning() {
 // ---------- attention, decisions, orders, logs ----------
 
 function renderAttention() {
-  const items = snap.attention.filter((a) => matches(a.title, a.detail));
+  const items = snap.attention.filter((a) => matches(a.title, a.detail)
+    && mineOnly(a.source === "job" ? findJob(a.kind, a.id) : findOrder(a.id)));
   const panel = document.getElementById("attention-panel");
   panel.classList.toggle("has-items", items.length > 0);
   document.getElementById("attention-count").textContent = items.length || "";
@@ -433,7 +450,7 @@ function renderAttention() {
 }
 
 function renderDecisions() {
-  const items = decisionItems().filter((i) => matches(i.text));
+  const items = decisionItems().filter((i) => mineOnly(i) && matches(i.text));
   const rank = (i) => (i.settled ? 2 : i.route === "anthony" ? 0 : 1);
   items.sort((a, b) => rank(a) - rank(b));
   const open = items.filter((i) => !i.settled && i.route === "anthony").length;
@@ -471,6 +488,7 @@ function orderCard(entry) {
         entry.from && el("span", {}, `from ${entry.from}`),
         entry.replies.length ? el("span", {}, `${entry.replies.length} replies`) : null,
       ),
+      foundationLine(entry),
       actionLine(entry),
       entry.status_text && entry.action !== "in_progress" ? el("p", { class: "line muted" }, md(entry.status_text)) : null,
     ),
@@ -491,7 +509,7 @@ function orderCard(entry) {
 }
 
 function renderOrders() {
-  const entries = snap.inbox.filter((e) => matches(e.title, e.status_text, e.body, ...e.replies.map((r) => r.text)));
+  const entries = snap.inbox.filter((e) => mineOnly(e) && matches(e.title, e.status_text, e.body, ...e.replies.map((r) => r.text)));
   const groups = groupedList("orders", entries, orderCard, "orders");
   document.getElementById("orders-count").textContent = `${entries.length - groups.done.length} live · ${groups.done.length} done`;
 }
@@ -974,12 +992,40 @@ function startDemo() {
   }, 650);
 }
 
+// One green or red line: STATUS.md readable, Windows heartbeat fresh, no stale locks, no placeholders.
+function renderSelfcheck() {
+  const sc = snap.selfcheck;
+  const box = document.getElementById("selfcheck");
+  if (!sc) { box.hidden = true; return; }
+  box.hidden = false;
+  box.className = `selfcheck ${sc.ok ? "ok" : "bad"}`;
+  box.title = sc.checks.map((c) => `${c.ok ? "✔" : "✖"} ${c.name}: ${c.detail}`).join("\n");
+  box.replaceChildren(el("b", {}, sc.ok ? "✔ SELF-CHECK" : "✖ SELF-CHECK"), " ", sc.line);
+  const mine = document.getElementById("mine-toggle");
+  mine.textContent = ui.mine ? "Showing only mine · show all" : `Only mine (${(snap.foundation && snap.foundation.mine) || 0})`;
+  mine.setAttribute("aria-pressed", String(ui.mine));
+}
+
+// The audit trail: every alert, clear, decision and bug the Brain recorded (append-only).
+function renderAudit() {
+  const rows = (snap.audit || []).filter((a) => matches(a.job, a.change, a.event));
+  document.getElementById("audit").replaceChildren(...(rows.length ? rows.map((a) => el("li", {},
+    el("span", { class: "a-time" }, a.at ? clock(a.at) : "—"),
+    el("span", { class: `a-ev a-${a.event}` }, a.event),
+    el("span", { class: "a-job" }, a.job || "—"),
+    el("span", { class: "a-change" }, clipText(a.change || "", 160)),
+    el("span", { class: "a-who" }, a.who || ""),
+  )) : [el("li", { class: "empty" }, "Nothing recorded yet.")]));
+}
+
 function renderAll() {
   if (!snap) return;
   if (window.renderHud) window.renderHud(snap);
   renderStatus();
   renderHero();
   renderTerminal();
+  renderSelfcheck();
+  renderAudit();
   renderAttention();
   renderRunning();
   renderJobs();
@@ -1117,6 +1163,7 @@ function tick() {
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("search").addEventListener("input", (ev) => { ui.query = ev.target.value.trim(); renderAll(); });
   document.getElementById("update-btn").addEventListener("click", updateNow);
+  document.getElementById("mine-toggle").addEventListener("click", () => { ui.mine = !ui.mine; renderAll(); });
   document.getElementById("detail-close").addEventListener("click", () => document.getElementById("detail").close());
   if (window.BrainsVisual) {
     const motion = window.BrainsVisual.motion;

@@ -26,12 +26,14 @@
     </div>
     <button type="button" class="update-btn" id="update-btn" title="Re-check every source now (cleared errors, new jobs, replies)">⟳ Update</button>
     <button type="button" class="motion-toggle" id="motion-toggle" aria-pressed="false">Motion</button>
+    <button type="button" class="motion-toggle" id="mine-toggle" aria-pressed="false" title="Show only items where Anthony is up next">Only mine</button>
     <label class="search">
       <span class="visually-hidden">Search jobs and work orders</span>
       <input id="search" type="search" placeholder="grep jobs, orders, messages…" autocomplete="off">
     </label>
   </header>
 
+  <p class="selfcheck" id="selfcheck" role="status" hidden></p>
   <section class="statusbar" id="statusbar" aria-label="At a glance"></section>
   <p class="legend" aria-label="What the badges mean">
     <span class="legend-k">legend</span>
@@ -102,6 +104,12 @@
       <section aria-labelledby="h-changelog" class="panel">
         <h2 id="h-changelog">MAC change log</h2>
         <ul class="bullets" id="changelog"></ul>
+      </section>
+
+      <section aria-labelledby="h-audit" class="panel">
+        <h2 id="h-audit">Audit trail</h2>
+        <p class="source">Append-only · every alert, clear, decision and bug · ~/.vader-mac-runs/brain/audit.jsonl</p>
+        <ol class="audit" id="audit"></ol>
       </section>
 
       <section aria-labelledby="h-incidents" class="panel">

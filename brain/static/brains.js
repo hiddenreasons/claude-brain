@@ -169,7 +169,15 @@
       this.resize();
       // Light on CPU: nothing is drawn while the stations are scrolled out of view.
       new IntersectionObserver((entries) => { this.visible = entries.some((e) => e.isIntersecting); }).observe(canvas);
-      new ResizeObserver(() => this.resize()).observe(canvas);
+      // The readout boxes (and the sample-mode banner) sit over the canvas: watch them too, so the stations
+      // always start below them, however long their text gets.
+      const watcher = new ResizeObserver(() => this.resize());
+      watcher.observe(canvas);
+      for (const box of canvas.parentElement.querySelectorAll(".hero-readout")) watcher.observe(box);
+      new MutationObserver(() => {
+        for (const box of canvas.parentElement.querySelectorAll(".demo-banner")) watcher.observe(box);
+        this.resize();
+      }).observe(canvas.parentElement, { childList: true });
       // A new screen density (window moved to another display) re-sizes the backing store, so lines stay sharp.
       const watchDpr = () => {
         const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
@@ -268,9 +276,24 @@
         a.R = R; b.R = R;
         return;
       }
-      const R = Math.min(w * 0.12, h * 0.24), cy = h * 0.47;
+      // Keep clear of the readout boxes: the spin-axis label sits about 1.3 R above the centre, and the name
+      // plates about 1.45 R + 48 px below it.
+      const top = this.overlayBottom() + 14;
+      const R = Math.max(40, Math.min(w * 0.12, (h - top - 56) / 2.75));
+      const cy = top + R * 1.3;
       a.cx = w * 0.27; a.cy = cy; a.R = R;
       b.cx = w * 0.73; b.cy = cy; b.R = R;
+    }
+
+    // The lowest edge of anything drawn over the top of the canvas (readouts, sample banner), in canvas px.
+    overlayBottom() {
+      const top = this.canvas.getBoundingClientRect().top;
+      let bottom = 0;
+      for (const box of this.canvas.parentElement.querySelectorAll(".hero-readout, .demo-banner")) {
+        const r = box.getBoundingClientRect();
+        if (r.height) bottom = Math.max(bottom, r.bottom - top);
+      }
+      return bottom;
     }
 
     frame(t) {

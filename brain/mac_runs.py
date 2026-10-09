@@ -380,6 +380,7 @@ def _job_folder(path: Path, children: Dict[str, os.DirEntry], cache: FileCache, 
         "exit_code": runs["exit_code"] if done else None,
         "gate": "failed" if "GATE-FAILED" in children else ("passed" if "GATE-PASSED" in children else None),
         "report_headline": report_headline,
+        "report_head": report_head,  # internal: proof is read from it, then it's dropped (foundation.apply)
         "headline_source": headline_source,
         "report_at": iso(mtime("REPORT.md")) if mtime("REPORT.md") else None,
         "followed_up_by": followed_up_by,
