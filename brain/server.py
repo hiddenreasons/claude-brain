@@ -9,15 +9,16 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlsplit
 
-from .comms import merge, running_from_comms
+from .brainfiles import BrainFiles
+from .comms import merge
 from .config import Config
+from .effects import Recorder, audit_tail, safe_record
 from .mac_runs import MSG_RE, is_safe_id, job_detail
 from .messages import derive_messages, mark_cleared, stamp_and_sort
 from .obsidian import VaultExporter, check_vault
@@ -33,6 +34,7 @@ STATIC_FILES = {
     "/volley.js": ("volley.js", "text/javascript; charset=utf-8"),
     "/synapse.js": ("synapse.js", "text/javascript; charset=utf-8"),
     "/readable.js": ("readable.js", "text/javascript; charset=utf-8"),
+    "/rules.js": ("rules.js", "text/javascript; charset=utf-8"),
     "/brains.js": ("brains.js", "text/javascript; charset=utf-8"),
     "/hud.js": ("hud.js", "text/javascript; charset=utf-8"),
     "/ask.js": ("ask.js", "text/javascript; charset=utf-8"),
@@ -65,6 +67,8 @@ class BrainState:
         self._first_seen: Dict[str, Optional[str]] = {}
         self.stopping = threading.Event()
         self._refresh_lock = threading.Lock()
+        self.files = BrainFiles(cfg.brain_dir) if cfg.record else None
+        self.recorder = Recorder(self.files) if self.files else None
 
     def refresh(self, force: bool = False) -> bool:
         with self._refresh_lock:
@@ -76,7 +80,9 @@ class BrainState:
             return False
         snapshot = build_snapshot(self.cfg, self.cache)
         comms, skipped = snapshot.pop("_comms")
-        remote_running = running_from_comms(comms, datetime.now(timezone.utc))
+        # Jobs running elsewhere: from MAC's log, minus any whose folder here has stopped, with WINDOWS
+        # state taken from the heartbeat (machines.remote_jobs).
+        remote_running = [j["id"] for j in snapshot["remote_jobs"] if j["state"] == "running"]
         snapshot["messages"] = stamp_and_sort(
             mark_cleared(merge(derive_messages(snapshot), comms), snapshot["folders"]),
             self._first_seen,
@@ -85,6 +91,9 @@ class BrainState:
         )
         snapshot["running_count"] += len(remote_running)
         snapshot["comms"] = {"events": len(comms), "skipped": skipped, "running": remote_running}
+        # One alert per job state, clears, decisions and bugs go to the Brain's own audit trail.
+        safe_record(self.recorder, snapshot)
+        snapshot["audit"] = audit_tail(self.files)
         payload = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
         with self.cond:
             self._fingerprint = fp

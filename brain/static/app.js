@@ -119,13 +119,14 @@ const FAMILY = {
 };
 const family = (state) => FAMILY[state] || "idle";
 
-// STATUS.md decisions: "~~Push/merge X~~ DONE 09:00 …" is settled; anything else still needs Anthony.
-const SETTLED_RE = /^~~[\s\S]+?~~\s*(DONE|DECIDED|APPROVED|DROPPED|RESOLVED|MERGED|CANCELLED|CANCELED)\b/i;
-function decisionState(text) {
-  const m = SETTLED_RE.exec(text.trim());
-  return m ? { settled: true, word: m[1].toUpperCase() } : { settled: false, word: "NEEDS YOU" };
-}
-const openDecisions = () => snap.status.decisions.filter((d) => !decisionState(d).settled);
+// STATUS.md decisions, judged by the server (brain/guard.py): "~~Push/merge X~~ DONE 09:00 …" is settled;
+// "confirm it's done" checks go to MAC; everything else open is Anthony's.
+const decisionItems = () => (snap.status.decision_items || []);
+const openDecisions = () => decisionItems().filter((i) => !i.settled && i.route === "anthony").map((i) => i.text);
+const decisionIds = (ids) => (ids || []).map((id) => {
+  const known = (snap.status.decision_log || {})[id];
+  return el("span", { class: "dec-id", title: known ? `${id} · ${known.when || ""} · ${known.text}` : `${id} (not in the decision log)` }, id);
+});
 
 const badge = (state) => el("span", { class: `badge s-${state} fam-${family(state)}` }, STATE_LABELS[state] || state);
 const money = (usd) => (typeof usd === "number" ? `$${usd.toFixed(2)} list-price est.` : null);
@@ -323,26 +324,29 @@ function activeRows() {
     if (j.state !== "running" && j.state !== "waiting") { stopped.add(j.id); continue; }
     const folder = j.kind === "folder";
     rows.push({
-      id: jobKey(j), job: j.id, title: j.title || j.id, where: "This Mac",
+      id: jobKey(j), job: j.id, title: j.title || j.id, where: "MAC", machine: "MAC",
       who: folder ? `Claude · ${[j.model, j.effort].filter(Boolean).join(" ")}`.replace(/ · $/, "") : "Claude (one-shot)",
       doing: folder ? lastAction(j.activity) || "starting" : "waiting for its result",
       started: folder ? localTime(j.started) : j.sent_at, moved: folder ? j.stream_updated_at : j.sent_at,
       open: () => openDetail(j.kind, j.id, j.title),
     });
   }
-  const running = new Set((snap.comms && snap.comms.running) || []);
-  for (const name of running) {
-    if (stopped.has(name) || rows.some((r) => r.job === name)) continue;
+  const beat = snap.windows || {};
+  for (const rj of snap.remote_jobs || []) {
+    if (rj.state !== "running" || stopped.has(rj.id) || rows.some((r) => r.job === rj.id)) continue;
+    const name = rj.id;
     const ms = (snap.messages || []).filter((m) => m.ref && m.ref.job === name && m.at); // newest first
     const last = ms[0], start = ms.find((m) => m.mac_kind === "job_started") || ms[ms.length - 1];
     const how = last && last.text.match(/\((opus|sonnet|haiku|fable)[^)]*\)/i);
+    const onBeat = rj.machine === "WINDOWS" && beat.fresh && beat.job === name;
     rows.push({
-      id: `comms:${name}`, job: name, title: start ? plain(start.text) : name,
-      where: (last && MACHINES[last.machine]) || "Off this Mac",
+      id: `comms:${name}`, job: name, title: start ? plain(start.text) : name, machine: rj.machine,
+      where: rj.machine === "WINDOWS" ? "WINDOWS" : "MAC",
       who: how ? `Claude · ${how[0].slice(1, -1).toLowerCase()}` : "Claude",
-      // MAC logs a job's start and finish, not its steps: say so rather than repeat the job's description
-      doing: last && last !== start ? plain(last.text) : "Started; MAC has logged nothing since",
-      started: start && start.at, moved: last && last.at,
+      // MAC logs a job's start and finish, not its steps; a fresh Windows heartbeat has its last log line
+      doing: onBeat && beat.last_log_line ? plain(beat.last_log_line)
+        : last && last !== start ? plain(last.text) : "Started; MAC has logged nothing since",
+      source: rj.source, started: rj.started_at, moved: onBeat ? beat.at : rj.last_at,
       open: () => { const n = brains && brains.findNode(`mac:${name}`); if (n) { document.querySelector(".hero").scrollIntoView({ behavior: "smooth" }); openNodePopup(n); } },
     });
   }
@@ -385,7 +389,7 @@ function renderRunning() {
     },
       el("td", {}, el("span", { class: "act act-in_progress" }, "▶ IN PROGRESS")),
       el("td", { class: "active-job" }, el("b", {}, r.job), el("span", {}, clipText(r.title, 90))),
-      el("td", {}, r.where),
+      el("td", {}, el("span", { class: `machine m-${r.where.toLowerCase()}`, title: r.source || "" }, r.where)),
       el("td", {}, r.who),
       el("td", { class: "active-doing" }, clipText(r.doing, 140)),
       el("td", { class: "active-num" }, r.started ? clock(r.started) : "—"),
@@ -429,17 +433,26 @@ function renderAttention() {
 }
 
 function renderDecisions() {
-  const items = snap.status.decisions.filter((d) => matches(d)).map((d) => ({ d, ...decisionState(d) }));
-  items.sort((a, b) => Number(a.settled) - Number(b.settled));
-  const open = items.filter((i) => !i.settled).length;
+  const items = decisionItems().filter((i) => matches(i.text));
+  const rank = (i) => (i.settled ? 2 : i.route === "anthony" ? 0 : 1);
+  items.sort((a, b) => rank(a) - rank(b));
+  const open = items.filter((i) => !i.settled && i.route === "anthony").length;
   document.getElementById("decisions-count").textContent = open ? String(open) : "";
   const list = document.getElementById("decisions");
-  list.replaceChildren(...(items.length
-    ? items.map((i) => el("li", { class: i.settled ? "decision settled" : "decision open", title: i.settled ? i.d : null },
-      el("span", { class: `badge ${i.settled ? "fam-good" : "fam-open"}` }, i.word), " ",
-      md(i.d),
-      i.settled ? null : el("span", {}, " ", ask(() => window.askDrafts.draftForDecision(i.d), "Copy my decision"))))
-    : [el("li", { class: "empty" }, "Nothing listed.")]));
+  const row = (i) => {
+    const cls = i.settled ? "decision settled" : i.route === "mac" ? "decision mac" : "decision open";
+    const fam = i.settled ? "fam-good" : i.route === "mac" ? "fam-handled" : "fam-open";
+    const action = i.settled ? null
+      : i.route === "mac" ? ask(() => window.askDrafts.draftForConfirm(i.text), "Ask MAC to confirm")
+      : ask(() => window.askDrafts.draftForDecision(i.text), "Copy my decision");
+    return el("li", { class: cls, title: i.settled ? i.text : null },
+      el("span", { class: `badge ${fam}` }, i.word), " ",
+      ...decisionIds(i.ids), " ",
+      md(i.text),
+      i.via ? el("span", { class: "via" }, ` → ${i.via}`) : null,
+      action ? el("span", {}, " ", action) : null);
+  };
+  list.replaceChildren(...(items.length ? items.map(row) : [el("li", { class: "empty" }, "Nothing listed.")]));
 }
 
 function orderCard(entry) {
@@ -682,7 +695,7 @@ function renderHero() {
   // Both readouts use the same list as the Active now table, so they never disagree with it.
   const active = activeRows();
   const running = snap.folders.filter((j) => j.state === "running"); // their tool calls spark below
-  const here = active.filter((r) => r.where === "This Mac").length;
+  const here = active.filter((r) => r.where === "MAC").length;
   const lastToClaude = (snap.messages || []).find((m) => m.at && m.direction === "to_claude");
   const macActive = lastToClaude && Date.now() - Date.parse(lastToClaude.at) < 30 * 60000;
   const out = active.filter((r) => !r.id.startsWith("wo:")).length; // jobs MAC has out with Claude

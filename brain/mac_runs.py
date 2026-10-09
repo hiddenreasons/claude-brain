@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .guard import PLACEHOLDER_RE, placeholders
 from .readers import FileCache, clip, iso, mtime_iso, read_tail, read_text
 
 MSG_RE = re.compile(r"^msg(?P<id>[A-Za-z0-9_-]+)\.txt$")
@@ -241,12 +242,28 @@ def brief_title(text: Optional[str], fallback: str) -> str:
     first_plain = None
     for raw in tail.splitlines():
         line = raw.strip().lstrip("#").strip()
-        if not line or line.upper().startswith(BOILERPLATE) or line.startswith("<"):
+        # Never a title made of an unfilled {{PLACEHOLDER}} (the brief is still flagged: see placeholders()).
+        if not line or line.upper().startswith(BOILERPLATE) or line.startswith("<") or PLACEHOLDER_RE.search(line):
             continue
         if raw.lstrip().startswith("#") or TITLE_PREFIX_RE.match(line):
             return clip(TITLE_PREFIX_RE.sub("", line), 160) or fallback
         first_plain = first_plain or line
+    if placeholders(text):
+        # A brief sent with unfilled {{PLACEHOLDERS}} (a harness bug, logged): its own heading, anywhere in it.
+        for raw in text.splitlines():
+            if raw.lstrip().startswith("#") and not PLACEHOLDER_RE.search(raw):
+                heading = raw.strip().lstrip("#").strip()
+                if heading and not heading.upper().startswith(BOILERPLATE):
+                    return clip(heading, 160)
     return clip(first_plain, 160) if first_plain else fallback
+
+
+def _safe_title(brief: Optional[str], folder: str) -> str:
+    """No empty templates: a brief with unfilled {{PLACEHOLDERS}} is titled by its folder name + its task line."""
+    title = brief_title(brief, folder)
+    if placeholders(brief) and title != folder:
+        return f"{folder}: {title}"
+    return title
 
 
 def _is_job_dir(names: List[str]) -> bool:
@@ -350,7 +367,10 @@ def _job_folder(path: Path, children: Dict[str, os.DirEntry], cache: FileCache, 
         "kind": "folder",
         "duration_s": _run_seconds(path, iters, latest, activity, cache) if stopped else None,
         "id": path.name,
-        "title": brief_title(brief, path.name),
+        "title": _safe_title(brief, path.name),
+        "machine": "MAC",
+        "path": str(path),
+        "placeholders": placeholders(brief),
         "state": state,
         "iteration": latest,
         "model": runs["model"],

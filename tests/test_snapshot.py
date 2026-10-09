@@ -35,7 +35,14 @@ def test_status_decisions_fold_sub_bullets_and_changelog_is_newest_first(tree):
     ]
     assert status["changelog"][0].startswith("2026-10-09 10:44")
     assert status["running_note"] == "Nothing running."
-    assert parse_status(None) == {"decisions": [], "changelog": [], "entries": [], "running_note": None}
+    assert parse_status(None) == {
+        "decisions": [],
+        "decision_items": [],
+        "decision_log": {},
+        "changelog": [],
+        "entries": [],
+        "running_note": None,
+    }
 
 
 def test_issues_read_table_rows_and_headings_newest_first(tree):

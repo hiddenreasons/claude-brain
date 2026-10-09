@@ -7,14 +7,17 @@ import os
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import gitread
 from .comms import TAIL_BYTES as COMMS_TAIL
 from .comms import comms_path, parse_comms
 from .config import Config
 from .inbox import parse_inbox
 from .labels import job_action, order_action
 from .mac_runs import scan_flat_jobs, scan_job_folders
+from .machines import read_heartbeat, remote_jobs
 from .readers import FileCache, clip, iso, mtime_iso, read_tail, read_text
 from .status_files import parse_issues, parse_status
 
@@ -147,7 +150,42 @@ def _comms_evidence(job: dict, comms: List[dict], since: str) -> List[tuple]:
     return found
 
 
-def apply_followups(jobs: List[dict], entries: List[dict], comms: List[dict]) -> None:
+def _decision_evidence(job: dict, decisions: List[dict], status_at: Optional[str], since: str) -> List[tuple]:
+    """A settled line in "Open decisions" that names the job (~~…~~ DONE/MERGED/…), seen after the report."""
+    if not status_at or status_at <= since:
+        return []
+    name = re.compile(rf"\b{re.escape(job['id'])}\b", re.I)
+    return [
+        (status_at, f"STATUS.md decision: {clip(d['text'], 200)}", True)
+        for d in decisions
+        if d.get("settled") and d.get("word") != "DROPPED" and name.search(d["text"])
+    ]
+
+
+def _git_evidence(job: dict, since: str) -> List[tuple]:
+    """The job's own worktree moved on after its report: a newer commit, or that commit merged into main."""
+    wt = Path(job["path"]) / "wt" if job.get("path") else None
+    if wt is None or not gitread.is_worktree(wt):
+        return []
+    found = gitread.head(wt)
+    if not found:
+        return []
+    sha, ts = found
+    at = iso(ts)
+    if not since or at <= since:
+        return []
+    merged = gitread.merged_into(wt, "main")
+    how = "merged into main" if merged else "committed in the job's worktree"
+    return [(at, f"git: {sha[:7]} {how} after the report", True)]
+
+
+def apply_followups(
+    jobs: List[dict],
+    entries: List[dict],
+    comms: List[dict],
+    decisions: Optional[List[dict]] = None,
+    status_at: Optional[str] = None,
+) -> None:
     """Clear a stuck job (folder or one-shot) when MAC says it's resolved after the report.
 
     For a one-shot with no result, MAC's word only counts after the order was sent.
@@ -160,7 +198,13 @@ def apply_followups(jobs: List[dict], entries: List[dict], comms: List[dict]) ->
         if job["state"] not in STUCK_STATES and job["state"] != "followed_up":
             continue
         since = job.get("report_at") or job.get("stream_updated_at") or job.get("sent_at") or ""
-        evidence = _status_evidence(job, entries, since) + _comms_evidence(job, comms, since)
+        # Recheck before any alert: STATUS.md change log and decisions, MAC's log, and the job's git state.
+        evidence = (
+            _status_evidence(job, entries, since)
+            + _comms_evidence(job, comms, since)
+            + _decision_evidence(job, decisions or [], status_at, since)
+            + _git_evidence(job, since)
+        )
         if not evidence:
             continue
         at, why, resolved = max(evidence, key=lambda e: e[0])
@@ -184,7 +228,17 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     comms, comms_skipped = cache.get(
         comms_path(cfg.runs_dir), "comms", lambda p: parse_comms(read_tail(p, COMMS_TAIL) or "")
     )
-    apply_followups(folders + oneshots, status.get("entries", []), comms)
+    for job in oneshots:
+        job["machine"] = "MAC"
+    apply_followups(
+        folders + oneshots,
+        status.get("entries", []),
+        comms,
+        status.get("decision_items", []),
+        mtime_iso(cfg.status_path),
+    )
+    heartbeat = read_heartbeat(cfg.runs_dir, now)
+    remote = remote_jobs(comms, folders + oneshots, heartbeat, now)
     # One flag the page trusts for fix-request buttons, so the rule lives in one place.
     for job in folders + oneshots:
         job.update(job_action(job))
@@ -203,6 +257,8 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
             "comms": {**_source(comms_path(cfg.runs_dir)), "optional": True},
         },
         "attention": build_attention(inbox, folders, oneshots, now),
+        "windows": heartbeat,
+        "remote_jobs": remote,
         "running_count": sum(j["state"] == "running" for j in folders) + sum(j["state"] == "waiting" for j in oneshots),
         "folders": folders,
         "oneshots": oneshots[:ONESHOT_LIMIT],
