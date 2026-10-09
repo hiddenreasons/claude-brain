@@ -6,8 +6,9 @@
 
 (function (root) {
   // Clearly different colours, kept away from the stations' blue (#6fd7ff) and orange (#ff9628)
-  // and from the alert red, so a job reads as itself on either station.
-  const PALETTE = ["#ff4fd8", "#b18cff", "#b6f04a", "#3fe58f", "#ff8fc7", "#e8e8ff"];
+  // and from the alert red, so a job reads as itself on either station. No pinks: at node size they
+  // read as the red NEEDS ANTHONY ring.
+  const PALETTE = ["#fff07a", "#b18cff", "#b6f04a", "#3fe58f", "#5b6cff", "#e8e8ff"];
   const BOLT_MS = 800; // one shot: 0.6 to 1 s
   const LAND_MS = 450; // glow on the receiving node
   const FLASH_MS = 700; // reduced motion: both nodes flash, nothing moves

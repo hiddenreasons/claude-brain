@@ -33,6 +33,22 @@ test("the palette stays clear of the blue and orange bases and of alert red", ()
   PALETTE.forEach((a, i) => PALETTE.slice(i + 1).forEach((b) => assert.ok(dist(rgb(a), rgb(b)) > 60, `${a} too close to ${b}`)));
 });
 
+test("no job colour is a shade of the alert red (no pinks or magentas)", () => {
+  const hue = (h) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    if (!d) return null; // grey or white: no hue
+    const x = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (x * 60 + 360) % 360;
+  };
+  for (const c of PALETTE) {
+    const hh = hue(c);
+    if (hh === null) continue;
+    const fromRed = Math.min(hh, 360 - hh);
+    assert.ok(fromRed >= 50, `${c} (hue ${Math.round(hh)}°) reads as the alert red`);
+  }
+});
+
 test("one comms entry fires exactly one bolt, MAC to Claude flying left to right", () => {
   const v = new Volley();
   const m = toClaude("m1", "issuestab");
