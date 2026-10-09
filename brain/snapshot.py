@@ -289,7 +289,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         }
         for j in snapshot["codex"]["failed"]
     ]
-    snapshot["windows_box"] = read_windows_status(cfg.runs_dir, now)
+    snapshot["windows_box"] = read_windows_status(cfg.runs_dir, now, snapshot["codex"]["running"])
     # Operations: usage, loops, restart storms, time in state, decision IDs, branch hygiene, conflicts.
     snapshot["ops"] = ops.apply(snapshot, cfg.vader_dir, cfg.runs_dir, now, comms)
     # Restart storms and possible loops are MAC's to look at, never Anthony's.

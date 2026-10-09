@@ -9,6 +9,7 @@ heartbeat a Windows job's state is the message log's word, and says so.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -34,7 +35,7 @@ def _when(value: Any) -> Optional[float]:
         return float(value) / (1000 if value > 1e12 else 1)
     if not isinstance(value, str) or not value.strip():
         return None
-    text = value.strip().replace("Z", "+00:00")
+    text = re.sub(r"(\.\d{6})\d+", r"\1", value.strip().replace("Z", "+00:00"))
     try:
         stamp = datetime.fromisoformat(text)
     except ValueError:
@@ -45,6 +46,21 @@ def _when(value: Any) -> Optional[float]:
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=EASTERN)
     return stamp.timestamp()
+
+
+def windows_status_path(runs_dir: Path) -> Path:
+    return runs_dir / "brain" / "windows-status.json"
+
+
+def _load(path: Path) -> Any:
+    """Parsed JSON, None when the file is missing, ValueError (the class) when it isn't JSON."""
+    raw = read_text(path, 256 * 1024)
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return ValueError
 
 
 def read_heartbeat(runs_dir: Path, now: float) -> Dict[str, Any]:
@@ -61,14 +77,20 @@ def read_heartbeat(runs_dir: Path, now: float) -> Dict[str, Any]:
         "last_log_line": None,
         "error": None,
         "machine_up": None,
+        "running_jobs": [],
+        "recent": [],
     }
-    raw = read_text(path, 64 * 1024)
-    if raw is None:
+    # MAC's copy at _xfer/win/heartbeat.json, else the "heartbeat" block of brain/windows-status.json.
+    beat = _load(path)
+    status = _load(windows_status_path(runs_dir))
+    if isinstance(status, dict):
+        out["recent"] = [r for r in status.get("recent") or [] if isinstance(r, dict) and r.get("job")]
+        if beat is None and isinstance(status.get("heartbeat"), dict):
+            beat, out["path"] = status["heartbeat"], str(windows_status_path(runs_dir))
+    if beat is None:
         out["reason"] = "no heartbeat copy on this Mac yet"
         return out
-    try:
-        beat = json.loads(raw)
-    except ValueError:
+    if beat is ValueError:
         out["reason"] = "heartbeat.json isn't valid JSON"
         return out
     if not isinstance(beat, dict):
@@ -89,6 +111,7 @@ def read_heartbeat(runs_dir: Path, now: float) -> Dict[str, Any]:
             "last_log_line": beat.get("last_log_line"),
             "error": beat.get("error") or None,
             "machine_up": beat.get("machine_up"),
+            "running_jobs": [str(j) for j in beat.get("running_jobs") or [] if isinstance(j, str)],
         }
     )
     out["reason"] = (
@@ -105,6 +128,8 @@ def _windows_state(job_id: str, beat: Dict[str, Any]) -> Optional[str]:
     """A Windows job's state from a fresh heartbeat, or None when the heartbeat can't say."""
     if not beat.get("found") or beat.get("stale"):
         return None
+    if job_id in (beat.get("running_jobs") or []):
+        return "running"
     if beat.get("job") != job_id:
         return "stopped"  # Windows is on another job (or none), so this one isn't running
     word = beat.get("job_state") or ""
@@ -138,13 +163,20 @@ def remote_jobs(
             machine[job] = m["machine"]
         if m.get("mac_kind") == "job_started":
             started[job] = m["at"]
+    # Windows' own list of finished jobs (windows-status.json "recent") beats a start with no logged finish.
+    finished = {r["job"]: r for r in beat.get("recent") or []}
     out: List[Dict[str, Any]] = []
     for job, m in last.items():
         if m.get("mac_kind") != "job_started" or job in stopped_here or job in running_here:
             continue
         is_win = machine.get(job) == "windows"
         state, source = "running", "MAC's message log (start logged, no finish)"
-        if is_win:
+        done = finished.get(job)
+        done_ts, start_ts = _when((done or {}).get("finished_at")), _when(started.get(job))
+        if is_win and done and done_ts and (start_ts is None or done_ts >= start_ts):
+            state = "done"
+            source = f"windows-status.json: finished {iso(done_ts)} ({done.get('first_line') or 'no first line'})"
+        elif is_win:
             from_beat = _windows_state(job, beat)
             if from_beat:
                 state, source = from_beat, "Windows heartbeat"
@@ -161,4 +193,20 @@ def remote_jobs(
                 "last_text": m.get("text"),
             }
         )
+    # Jobs Windows' heartbeat says are running that MAC's log never mentioned.
+    if beat.get("found") and not beat.get("stale"):
+        known = {j["id"] for j in out} | running_here | stopped_here
+        for job in beat.get("running_jobs") or []:
+            if job not in known:
+                out.append(
+                    {
+                        "id": job,
+                        "machine": "WINDOWS",
+                        "state": "running",
+                        "source": "Windows heartbeat",
+                        "started_at": None,
+                        "last_at": beat.get("at"),
+                        "last_text": beat.get("last_log_line"),
+                    }
+                )
     return out
