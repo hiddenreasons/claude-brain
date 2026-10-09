@@ -43,7 +43,7 @@ Hover a bolt, or a line in "Latest messages", to see the message. Messages that 
 
 | Panel | Where it comes from |
 |---|---|
-| Needs attention | Blocked work orders, failed startup gates, stalled or errored jobs from the last 3 days |
+| Needs attention | Blocked work orders, failed startup gates, stalled or errored jobs from the last 3 days (older ones stay marked NEEDS ANTHONY in the lists) |
 | Running now | MAC's job folders whose live stream (`iter-N.jsonl`) is being written, with Claude's latest actions |
 | MAC → Claude jobs | Every job MAC gave Claude: job folders (`brief.md`, `REPORT.md`, `runs.log`) and one-shot orders (`msg*.txt` / `out*.json` / `err*.txt`). Click one for the full order, result, report and activity |
 | Waiting on Anthony | "Open decisions awaiting Anthony" in MAC's `STATUS.md` |
@@ -53,11 +53,19 @@ Hover a bolt, or a line in "Latest messages", to see the message. Messages that 
 Job states, in plain words:
 
 - **Running**: Claude wrote to its live stream in the last 10 minutes (or its process is alive and wrote in the last 3 hours).
-- **Stalled**: the run never finished, and nothing has been written for a while.
+- **Stalled**: the run never finished, and nothing has been written for a while. A one-shot order with no result 6 hours after MAC sent it is stalled too.
 - **Blocked**: Claude's report starts `TO MAC: BLOCKED`, and MAC hasn't touched the job folder since.
 - **MAC followed up**: the report said blocked, and MAC wrote files in the folder afterwards (for example a commit log).
+- **Cleared by MAC**: MAC's `STATUS.md` change log or message log says the problem is fixed.
 - **No report**: the run finished with no `REPORT.md` and no final reply.
 - **No Claude run**: a brief exists but no Claude run started (for example a Codex job).
+
+Every job and work order also gets one action label (`brain/labels.py`). The lists group by it, in this order:
+
+- **NEEDS ANTHONY** (red): blocked, stalled, gate failed, no report or error jobs; BLOCKED work orders; work orders waiting on Anthony's decision. Only these get a "Copy fix request" button.
+- **IN PROGRESS** (amber): running jobs and RUNNING work orders, with who is on it and when the log last moved.
+- **QUEUED** (dim): OPEN and PARKED work orders, with what they wait behind when the inbox says.
+- **DONE** (green): done, cleared or MAC followed up. These sit in a collapsed Done section.
 
 Costs shown on jobs are Claude's own list-price estimates from the result files, not charges. The Max plan doesn't bill per job.
 
