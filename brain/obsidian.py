@@ -36,6 +36,7 @@ STATE_WORDS = {
     "stalled": "Stalled",
     "no_report": "No report",
     "followed_up": "MAC followed up",
+    "cleared": "Cleared by MAC",
     "prepared": "No Claude run",
     "no_result": "No result",
 }
@@ -369,8 +370,9 @@ def render_job(j: Dict[str, Any], detail: Dict[str, Any], orders: List[Tuple[str
     parts = [fm, f"# {safe_text(j['id'])}: {safe_text(job_title(j))}", " · ".join(facts)]
     if orders:
         parts.append("**Work orders:** " + ", ".join(link(p, label) for p, label in orders))
-    if j["state"] == "followed_up" and j.get("followed_up_by"):
-        parts.append(f"MAC acted after the report ({j['followed_up_by']}, {local_time(j.get('followed_up_at'))}).")
+    if j["state"] in ("followed_up", "cleared") and j.get("followed_up_by"):
+        lead = "Cleared" if j["state"] == "cleared" else "MAC acted after the report"
+        parts.append(f"{lead} ({j['followed_up_by']}, {local_time(j.get('followed_up_at'))}).")
 
     if folder:
         if detail.get("report"):

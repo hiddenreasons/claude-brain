@@ -5,7 +5,7 @@
 
 const STATE_LABELS = {
   running: "Running", waiting: "Waiting", done: "Done", blocked: "Blocked", error: "Error",
-  gate_failed: "Gate failed", stalled: "Stalled", no_report: "No report", followed_up: "MAC followed up",
+  gate_failed: "Gate failed", stalled: "Stalled", no_report: "No report", followed_up: "MAC followed up", cleared: "Cleared",
   prepared: "No Claude run", no_result: "No result",
   OPEN: "Open", BLOCKED: "Blocked", PARKED: "Parked", DONE: "Done", RUNNING: "Running", NOTE: "Note",
 };
@@ -137,9 +137,9 @@ function jobLine(job) {
       const from = job.headline_source === "final reply" ? "Final reply: " : "";
       lines.push(el("p", { class: "line" }, from, md(job.report_headline)));
     }
-    if (job.state === "followed_up") {
+    if (job.state === "followed_up" || job.state === "cleared") {
       lines.push(el("p", { class: "line muted" },
-        `MAC acted after the report (${job.followed_up_by}`, job.followed_up_at ? `, ${relTime(job.followed_up_at)}` : "", ")"));
+        job.state === "cleared" ? `Cleared (${job.followed_up_by}` : `MAC acted after the report (${job.followed_up_by}`, job.followed_up_at ? `, ${relTime(job.followed_up_at)}` : "", ")"));
     }
     return lines;
   }
@@ -150,7 +150,8 @@ function jobLine(job) {
 
 // ---------- copy-a-fix-request buttons (ask.js) ----------
 
-const ISSUE_STATES = new Set(["blocked", "error", "gate_failed", "stalled", "no_report", "followed_up", "no_result"]);
+// Only open problems get a fix-request button. Followed-up and cleared jobs are resolved: never an issue.
+const ISSUE_STATES = new Set(["blocked", "error", "gate_failed", "stalled", "no_report", "no_result"]);
 const findJob = (kind, id) => (kind === "folder" ? snap.folders : snap.oneshots).find((j) => j.id === id);
 const findOrder = (id) => snap.inbox.find((e) => e.id === id);
 
@@ -194,7 +195,7 @@ function allJobs() {
 function jobPassesFilter(job) {
   if (ui.jobFilter === "live") return job.state === "running" || job.state === "waiting";
   if (ui.jobFilter === "problems") return PROBLEM_STATES.has(job.state);
-  if (ui.jobFilter === "done") return job.state === "done" || job.state === "followed_up";
+  if (ui.jobFilter === "done") return ["done", "followed_up", "cleared"].includes(job.state);
   return true;
 }
 
@@ -424,13 +425,14 @@ function renderTerminal() {
   const lines = timed.map((m) => {
     const isNew = termPrimed && !termSeen.has(m.id);
     termSeen.add(m.id);
-    const dirClass = m.blocked ? "blocked" : m.direction;
+    const open = m.blocked && !m.cleared; // a blocked report MAC resolved since is history, not an alert
+    const dirClass = open ? "blocked" : m.direction;
     const arrow = m.direction === "to_claude" ? "MAC ▸ CLAUDE" : "CLAUDE ▸ MAC";
     const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
     return el("li", {},
       el("button", {
         type: "button", class: `term-line${isNew ? " new" : ""}`, "data-id": m.id,
-        title: `${clock(m.at)} · ${arrow} · ${kind}${m.blocked ? " · BLOCKED" : ""}\n${m.text}`,
+        title: `${clock(m.at)} · ${arrow} · ${kind}${open ? " · BLOCKED" : m.cleared ? " · was BLOCKED, now cleared" : ""}\n${m.text}`,
         onclick: () => openMessage(m),
         onmouseenter: () => brains && brains.highlight(m.id),
         onmouseleave: () => brains && brains.highlight(null),
@@ -438,7 +440,7 @@ function renderTerminal() {
         onblur: () => brains && brains.highlight(null),
       },
         el("span", { class: "term-time" }, clock(m.at)),
-        el("span", { class: `term-dir ${dirClass}` }, m.blocked ? `${arrow} ✖` : arrow),
+        el("span", { class: `term-dir ${dirClass}` }, open ? `${arrow} ✖` : m.cleared ? `${arrow} ✔` : arrow),
         el("span", { class: "term-txt" }, el("span", { class: "term-kind" }, `${kind.toLowerCase().replace(/ /g, "_")}:`), m.text),
       )
     );
@@ -486,7 +488,7 @@ function renderStatus() {
     statTile("msgs_24h", day.length, `${toClaude} MAC→Claude · ${day.length - toClaude} Claude→MAC`, "var(--claude)", "messages"),
     statTile("last_msg", last ? relTime(last.at).replace(" ago", "") : "—",
       last ? `${last.direction === "to_claude" ? "MAC→Claude" : "Claude→MAC"}: ${last.text}` : "none yet",
-      last && last.blocked ? "var(--accent)" : "var(--text)", "messages"),
+      last && last.blocked && !last.cleared ? "var(--accent)" : "var(--text)", "messages"),
   );
 }
 
@@ -521,7 +523,7 @@ function renderHero() {
 
   if (!brains) return;
   // Orbiting labels: Claude's latest jobs, MAC's open orders. Colors are their real status.
-  const jobColor = { running: "#ffd166", waiting: "#ffd166", done: "#ffb15c", followed_up: "#50c8ff" };
+  const jobColor = { running: "#ffd166", waiting: "#ffd166", done: "#ffb15c", followed_up: "#50c8ff", cleared: "#5bd38a" };
   brains.setOrbits({
     claude: allJobs().slice(0, 14).map((j) => ({ text: j.id, color: jobColor[j.state] || (/(blocked|error|stalled|gate|no_report)/.test(j.state) ? "#ff4d5e" : "#8d96a5") })),
     mac: snap.inbox.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state)).slice(0, 14)

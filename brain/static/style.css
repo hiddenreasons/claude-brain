@@ -276,7 +276,7 @@ button.card:hover { border-color: var(--line-2); }
 .badge::before { content: "["; }
 .badge::after { content: "]"; }
 .s-running, .s-waiting, .s-RUNNING { color: var(--running); }
-.s-done, .s-DONE { color: var(--done); }
+.s-done, .s-DONE, .s-cleared { color: var(--done); }
 .s-blocked, .s-error, .s-gate_failed, .s-stalled, .s-no_report, .s-BLOCKED { color: var(--accent); }
 .s-followed_up, .s-OPEN { color: var(--mac); }
 .s-prepared, .s-no_result, .s-PARKED, .s-NOTE { color: var(--neutral); }

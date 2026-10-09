@@ -65,3 +65,16 @@ def test_newest_first_and_capped():
 def test_local_iso_handles_bad_input():
     assert local_iso(None) is None
     assert local_iso("not a time") is None
+
+
+def test_blocked_messages_about_a_resolved_job_show_as_cleared():
+    from brain.messages import mark_cleared
+
+    folders = [{"id": "claudemd", "state": "cleared"}, {"id": "other", "state": "blocked"}]
+    msgs = [
+        {"id": "a", "blocked": True, "ref": {"source": "comms", "job": "claudemd"}},
+        {"id": "b", "blocked": True, "ref": {"source": "job", "kind": "folder", "id": "claudemd"}},
+        {"id": "c", "blocked": True, "ref": {"source": "comms", "job": "other"}},
+        {"id": "d", "blocked": False, "ref": {"source": "comms", "job": "claudemd"}},
+    ]
+    assert [m["cleared"] for m in mark_cleared(msgs, folders)] == [True, True, False, False]

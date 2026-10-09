@@ -43,6 +43,7 @@ def _msg(
     at: Optional[str],
     ref: Dict[str, str],
     blocked: bool = False,
+    cleared: bool = False,
 ) -> Dict[str, Any]:
     return {
         "id": mid,
@@ -51,6 +52,8 @@ def _msg(
         "text": clip((text or "").strip(), TEXT_LIMIT),
         "at": at,
         "blocked": blocked,
+        # A blocked report that MAC has since resolved: kept in history, shown as cleared, never an alert.
+        "cleared": cleared,
         "ref": ref,
     }
 
@@ -108,11 +111,12 @@ def derive_messages(snapshot: Dict[str, Any]) -> List[Dict[str, Any]]:
         ref = {"source": "job", "kind": "folder", "id": job["id"]}
         base = f"folder:{job['id']}:i{job['iteration']}"
         messages.append(_msg(f"{base}:sent", "to_claude", "job_sent", job["title"], local_iso(job.get("started")), ref))
-        if job["state"] in ("done", "blocked", "followed_up", "gate_failed", "no_report", "error"):
+        if job["state"] in ("done", "blocked", "followed_up", "cleared", "gate_failed", "no_report", "error"):
             text = job.get("report_headline") or f"Run ended ({job['state'].replace('_', ' ')})"
             blocked = job["state"] in ("blocked", "gate_failed", "error") or _blocked(job.get("report_headline"))
             at = job.get("report_at") or job.get("stream_updated_at")
-            messages.append(_msg(f"{base}:report", "to_mac", "report", text, at, ref, blocked=blocked))
+            cleared = blocked and job["state"] in ("followed_up", "cleared")
+            messages.append(_msg(f"{base}:report", "to_mac", "report", text, at, ref, blocked=blocked, cleared=cleared))
     return messages
 
 
@@ -127,3 +131,13 @@ def stamp_and_sort(
             message["at"] = first_seen[message["id"]]
     messages.sort(key=lambda m: m["at"] or "", reverse=True)
     return messages[:SEND_LIMIT]
+
+
+def mark_cleared(messages: List[Dict[str, Any]], folders: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Every blocked message about a job MAC has since resolved shows as cleared (from any source)."""
+    resolved = {j["id"] for j in folders if j["state"] in ("cleared", "followed_up")}
+    for m in messages:
+        ref = m.get("ref", {})
+        job = ref.get("id") if ref.get("source") == "job" else ref.get("job")
+        m["cleared"] = bool(m.get("cleared")) or (bool(m.get("blocked")) and job in resolved)
+    return messages

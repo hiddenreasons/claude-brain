@@ -562,7 +562,7 @@
     // One solid color per direction, so they can't be confused: blue = MAC to Claude, orange = Claude to MAC,
     // red with a white-hot core = BLOCKED.
     boltColors(message) {
-      if (message.blocked) return { ...PALETTE.blocked, core: [255, 250, 246] };
+      if (message.blocked && !message.cleared) return { ...PALETTE.blocked, core: [255, 250, 246] };
       return message.direction === "to_claude" ? PALETTE.mac : PALETTE.claude;
     }
 
@@ -576,7 +576,7 @@
       this.flareColor[sender] = colors;
       if (first || bolt.strikes % 3 === 0) this.waves.push({ x: to[0], y: to[1], born: performance.now() / 1000, colors });
       if (reduceMotion) return;
-      this.screenFlash = { amount: Math.max(this.screenFlash.amount, first ? (bolt.message.blocked ? 0.3 : 0.2) : 0.07), color: colors.mid };
+      this.screenFlash = { amount: Math.max(this.screenFlash.amount, first ? (bolt.message.blocked && !bolt.message.cleared ? 0.3 : 0.2) : 0.07), color: colors.mid };
       this.spawnSparks(to, colors, first ? 46 : 18);
     }
 
@@ -979,11 +979,11 @@
 
   function showTooltip(node, message) {
     const head = document.createElement("strong");
-    head.textContent = `${directionLabel(message)} · ${KIND_LABELS[message.kind] || message.kind}${message.blocked ? " · BLOCKED" : ""}`;
+    head.textContent = `${directionLabel(message)} · ${KIND_LABELS[message.kind] || message.kind}${message.blocked && !message.cleared ? " · BLOCKED" : message.cleared ? " · cleared" : ""}`;
     const body = document.createElement("span");
     body.textContent = message.text || "";
     node.replaceChildren(head, body);
-    node.className = `bolt-tip ${message.blocked ? "blocked" : message.direction}`;
+    node.className = `bolt-tip ${message.blocked && !message.cleared ? "blocked" : message.direction}`;
     node.hidden = false;
   }
 

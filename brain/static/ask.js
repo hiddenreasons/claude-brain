@@ -31,6 +31,10 @@ function suggestedBuilder(text) {
 
 // What to ask for depends on why it's stuck: some blocks wait on Anthony, not on a builder.
 function nextStep(job) {
+  // Resolved first: a cleared or followed-up job never asks for an approval, whatever its old report said.
+  if (job.state === "cleared" || job.state === "followed_up") {
+    return ["MAC already resolved this after the report. Nothing to approve: just confirm it's fully done."];
+  }
   const said = `${job.report_headline || ""} ${job.note || ""}`.toLowerCase();
   if (/danger[_ ]?guard/.test(said)) {
     return [
@@ -42,9 +46,6 @@ function nextStep(job) {
     return [
       "Claude stopped at a sandbox limit. Tell me whether this needs a step run outside the sandbox, exactly what that step is, and whether it's safe; or change the brief so it isn't needed.",
     ];
-  }
-  if (job.state === "followed_up") {
-    return ["Please confirm it's fully resolved. If anything is still open, finish it."];
   }
   return [
     "Please find the cause and fix it, or send it to the right builder.",
@@ -66,7 +67,7 @@ function draftForJob(job) {
   if (job.note) lines.push(`Note: ${job.note}`);
   if (job.error_preview) lines.push(`Errors: "${quote(job.error_preview, 300)}"`);
   if (job.state === "stalled") lines.push(`Its live log stopped updating ${relTime(job.stream_updated_at) || "a while ago"} and the run never finished.`);
-  if (job.state === "followed_up") lines.push(`You already acted after the report (${job.followed_up_by}, ${relTime(job.followed_up_at)}).`);
+  if (job.state === "followed_up" || job.state === "cleared") lines.push(`You already acted after the report (${job.followed_up_by}, ${relTime(job.followed_up_at)}).`);
   const last = (job.activity || []).slice(-3).map((a) => (a.kind === "tool" ? `${a.name}: ${clean(a.summary)}` : `Claude: ${quote(a.text, 140)}`));
   if (last.length) lines.push(`Last actions: ${last.join(" | ")}`);
   lines.push("", ...nextStep(job));

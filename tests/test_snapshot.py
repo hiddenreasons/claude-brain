@@ -139,7 +139,7 @@ def test_a_stuck_job_clears_when_macs_change_log_says_it_was_fixed(tree):
     )
     snap = build_snapshot(tree, FileCache())
     job = next(j for j in snap["folders"] if j["id"] == "claudemd")
-    assert job["state"] == "followed_up" and job["followed_up_by"].startswith("STATUS.md: ")
+    assert job["state"] == "cleared" and job["followed_up_by"].startswith("STATUS.md: ")
     assert not any(a.get("id") == "claudemd" for a in snap["attention"])
     assert "entries" not in snap["status"]  # internal only
 
@@ -167,3 +167,94 @@ def test_job_names_must_match_whole_words(tree):
     _status_with(tree, f"{_local(5)} VADER c3: safetyfixes committed abc.")
     job = next(j for j in build_snapshot(tree, FileCache())["folders"] if j["id"] == "fix")
     assert job["state"] == "blocked"
+
+
+def _comms(tree, *lines):
+    import json as _json
+
+    rows = []
+    for i, (minutes_ago, kind, extra) in enumerate(lines):
+        from datetime import datetime, timedelta, timezone
+
+        at = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        row = {
+            "v": 1,
+            "id": f"c{i}",
+            "at": at,
+            "from": "mac",
+            "to": "claude",
+            "kind": kind,
+            "text": "t",
+            "job": "claudemd",
+        }
+        row.update(extra)
+        rows.append(_json.dumps(row))
+    write(tree.runs_dir / "brain" / "comms.jsonl", "\n".join(rows) + "\n")
+
+
+def _job_state(tree):
+    snap = build_snapshot(tree, FileCache())
+    return next(j for j in snap["folders"] if j["id"] == "claudemd"), snap
+
+
+def test_a_comms_unblocked_line_after_the_report_clears_it(tree):
+    _stuck_job(tree, "claudemd", report_age_s=3600)
+    _comms(tree, (5, "unblocked", {"text": "danger_guard approved, committed f1d2a32"}))
+    job, snap = _job_state(tree)
+    assert job["state"] == "cleared" and job["followed_up_by"].startswith("MAC (comms log): ")
+    assert not any(a.get("id") == "claudemd" for a in snap["attention"])
+
+
+def test_a_comms_unblocked_line_before_the_report_does_not_clear_it(tree):
+    _stuck_job(tree, "claudemd", report_age_s=600)
+    _comms(tree, (60, "unblocked", {}))
+    assert _job_state(tree)[0]["state"] == "blocked"
+
+
+def test_newest_word_wins_a_later_blocked_line_reopens(tree):
+    _stuck_job(tree, "claudemd", report_age_s=3600)
+    _comms(
+        tree,
+        (30, "unblocked", {}),
+        (5, "blocked", {"from": "claude", "to": "mac", "text": "TO MAC: BLOCKED again"}),
+    )
+    assert _job_state(tree)[0]["state"] == "blocked"
+
+
+def test_still_open_wording_does_not_clear(tree):
+    for wording in ("still BLOCKED", "awaiting Anthony --approve", "commit pending review"):
+        _stuck_job(tree, "claudemd", report_age_s=3600)
+        _status_with(tree, f"{_local(5)} VADER c3: claudemd {wording}.")
+        assert _job_state(tree)[0]["state"] == "blocked", wording
+
+
+def test_resolved_jobs_never_raise_an_alert(tree):
+    # MAC acted in the job folder after the BLOCKED report: followed up, so no alert.
+    _stuck_job(tree, "claudemd", report_age_s=3600)
+    write(tree.runs_dir / "claudemd" / "commit-final.log", "ok", age_s=600)
+    job, snap = _job_state(tree)
+    assert job["state"] == "followed_up"
+    assert not any(a.get("id") == "claudemd" for a in snap["attention"])
+
+
+def test_a_cleared_jobs_blocked_report_stays_in_history_marked_cleared(tree):
+    from brain.messages import derive_messages
+
+    _stuck_job(tree, "claudemd", report_age_s=3600)
+    _status_with(tree, f"{_local(5)} VADER c3: claudemd step 2 committed f1d2a32.")
+    snap = build_snapshot(tree, FileCache())
+    report = next(m for m in derive_messages(snap) if m["id"] == "folder:claudemd:i1:report")
+    assert report["blocked"] is True and report["cleared"] is True
+
+
+def test_a_bare_mention_does_not_reopen_and_every_mention_counts(tree):
+    # MAC's real 13:59 entry: the first mention has no status word, the second says resolved.
+    _stuck_job(tree, "claudemd", report_age_s=3600)
+    _status_with(
+        tree,
+        f"{_local(30)} VADER c3: claudemd step 2 committed f1d2a32.",
+        f"{_local(5)} VADER c3: Queued brainclear. Also: claudemd alert at 13:55 was stale; "
+        "claudemd step 2 committed f1d2a32 and merged fc34dcd, resolved.",
+        f"{_local(2)} VADER c3: looked at claudemd notes again.",
+    )
+    assert _job_state(tree)[0]["state"] == "cleared"
