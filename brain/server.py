@@ -9,12 +9,14 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlsplit
 
+from .comms import merge, read_comms, running_from_comms
 from .config import Config
 from .mac_runs import MSG_RE, is_safe_id, job_detail
 from .messages import derive_messages, stamp_and_sort
@@ -63,9 +65,13 @@ class BrainState:
         if not force and fp == self._fingerprint:
             return False
         snapshot = build_snapshot(self.cfg, self.cache)
+        comms, skipped = read_comms(self.cfg.runs_dir)
+        remote_running = running_from_comms(comms, datetime.now(timezone.utc))
         snapshot["messages"] = stamp_and_sort(
-            derive_messages(snapshot), self._first_seen, iso(time.time()), initial=self.version == 0
+            merge(derive_messages(snapshot), comms), self._first_seen, iso(time.time()), initial=self.version == 0
         )
+        snapshot["running_count"] += len(remote_running)
+        snapshot["comms"] = {"events": len(comms), "skipped": skipped, "running": remote_running}
         payload = json.dumps(snapshot, ensure_ascii=False).encode("utf-8")
         with self.cond:
             self._fingerprint = fp

@@ -54,7 +54,7 @@ def main(argv=None) -> int:
 
 def check(cfg) -> int:
     snap = build_snapshot(cfg, FileCache())
-    missing = [name for name, src in snap["sources"].items() if not src["exists"]]
+    missing = [name for name, src in snap["sources"].items() if not src["exists"] and not src.get("optional")]
 
     def states(items):
         return dict(Counter(i["state"] for i in items))

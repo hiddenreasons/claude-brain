@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from .comms import comms_path
 from .config import Config
 from .inbox import parse_inbox
 from .mac_runs import scan_flat_jobs, scan_job_folders
@@ -114,6 +115,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
             "runs": _source(cfg.runs_dir),
             "status": _source(cfg.status_path),
             "issues": _source(cfg.issues_path),
+            "comms": {**_source(comms_path(cfg.runs_dir)), "optional": True},
         },
         "attention": build_attention(inbox, folders, oneshots, now),
         "running_count": sum(j["state"] == "running" for j in folders) + sum(j["state"] == "waiting" for j in oneshots),

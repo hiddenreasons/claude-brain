@@ -108,6 +108,23 @@ def test_unknown_path_is_404(server):
     assert get(port, "/../../etc/passwd")[0].status == 404
 
 
+def test_a_line_in_macs_message_log_reaches_the_page(server):
+    cfg, port = server
+    line = (
+        '{"v":1,"id":"t1","at":"2026-10-09T15:16:57Z","from":"mac","to":"claude",'
+        '"kind":"reply","text":"Test from MAC"}\n'
+    )
+    write(cfg.runs_dir / "brain" / "comms.jsonl", line)
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        data = json.loads(get(port, "/api/snapshot")[1])
+        if any(m["id"] == "comms:t1" for m in data["messages"]):
+            break
+        time.sleep(0.1)
+    assert data["comms"]["events"] == 1
+    assert next(m for m in data["messages"] if m["id"] == "comms:t1")["direction"] == "to_claude"
+
+
 def test_live_stream_announces_a_change_within_seconds(server):
     cfg, port = server
     sock = socket.create_connection(("127.0.0.1", port), timeout=5)

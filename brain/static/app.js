@@ -196,8 +196,16 @@ function renderJobs() {
 
 function renderRunning() {
   const live = allJobs().filter((j) => j.state === "running" || j.state === "waiting");
-  document.getElementById("running-count").textContent = live.length || "";
+  const elsewhere = (snap.comms && snap.comms.running) || [];
+  document.getElementById("running-count").textContent = live.length + elsewhere.length || "";
   const box = document.getElementById("running");
+  const elsewhereNote = elsewhere.length
+    ? el("p", { class: "line" }, "Running off this Mac, per MAC's log: ", elsewhere.join(", "))
+    : null;
+  if (!live.length && elsewhere.length) {
+    box.replaceChildren(elsewhereNote);
+    return;
+  }
   if (!live.length) {
     const latest = allJobs()[0];
     box.replaceChildren(
@@ -220,6 +228,7 @@ function renderRunning() {
       )
     )
   )));
+  if (elsewhereNote) box.append(elsewhereNote);
 }
 
 // ---------- attention, decisions, orders, logs ----------
@@ -328,7 +337,10 @@ function renderLogs() {
     "Reading: ",
     ...Object.entries(snap.sources).flatMap(([name, src], i) => [
       i ? " · " : "",
-      `${name} `, src.exists ? el("span", {}, "(", relTime(src.updated_at) || "ok", ")") : el("strong", {}, "(missing)"),
+      `${name} `,
+      src.exists
+        ? el("span", {}, "(", relTime(src.updated_at) || "ok", ")")
+        : src.optional ? el("span", {}, "(not started yet)") : el("strong", {}, "(missing)"),
     ]),
     `. Nothing here can change those files.`
   );
@@ -357,7 +369,14 @@ function handleMessages(s) {
 function messageItem(m) {
   const dir = window.BrainsVisual ? window.BrainsVisual.directionLabel(m) : m.direction;
   const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
-  const open = () => (m.ref.source === "job" ? openDetail(m.ref.kind, m.ref.id, m.text) : revealOrder(m.ref.id));
+  const open = () => {
+    if (m.ref.source === "job") return openDetail(m.ref.kind, m.ref.id, m.text);
+    if (m.ref.source === "work_order") return revealOrder(m.ref.id);
+    // From MAC's log: go to the job or work order it names, if the Brain knows it.
+    if (m.ref.job && snap.folders.some((j) => j.id === m.ref.job)) return openDetail("folder", m.ref.job, m.text);
+    const order = m.ref.wo !== null && snap.inbox.find((e) => e.wo === m.ref.wo);
+    if (order) revealOrder(order.id);
+  };
   return el("li", {},
     el("button", {
       type: "button", class: `msg-item ${m.blocked ? "blocked" : m.direction}`, "data-id": m.id,
