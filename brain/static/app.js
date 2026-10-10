@@ -24,7 +24,7 @@ const actionBadge = (action) => el("span", { class: `act act-${action}` }, ACTIO
 const JOB_LIST_LIMIT = 80;
 const FRESH_MS = 90_000;
 
-const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false }, openNode: null, mine: false };
+const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false }, openNode: null, mine: false, commsFilter: "all" };
 
 // "Only mine": Anthony's view shows only items where he is up next (brain/foundation.py).
 const mineOnly = (item) => !ui.mine || (item && item.up_next === "Anthony");
@@ -814,6 +814,7 @@ function handleMessages(s) {
   }
   // Oldest first; volley.js keeps at most three bolts in flight and queues the rest.
   fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m) => {
+    if (window.commsWire) window.commsWire.fire(m);                 // the packet on the comms wire
     if (!brains) return;
     // Codex reports to MAC: a spark on the station of the machine it runs on, not a bolt
     if (m.direction === "codex") brains.spark(m.machine === "windows" ? "windows" : "mac", `codex:${m.ref.job}`);
@@ -872,7 +873,8 @@ function dayLabel(iso) {
 
 // comms feed: newest first, grouped by day. Lines that arrive while the page is open slide in at the top.
 function renderTerminal() {
-  const timed = (snap.messages || []).filter((m) => m.at && matches(m.text, m.kind)).slice(0, TERM_LINES);
+  const keep = (m) => !window.commsWire || window.commsWire.match(m);  // the comms filter (hud.js): All, Claude, Windows…
+  const timed = (snap.messages || []).filter((m) => m.at && matches(m.text, m.kind) && keep(m)).slice(0, TERM_LINES);
   const box = document.getElementById("messages");
   const atTop = box.scrollTop < 24;
   const perDay = {};
@@ -1340,7 +1342,11 @@ function startDemo() {
   };
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   let i = 0;
-  const shot = (key, direction, text, machine) => brains.fire({ id: `demo-${i++}`, direction, machine, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } });
+  const shot = (key, direction, text, machine) => {
+    const m = { id: `demo-${i++}`, direction, machine, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } };
+    brains.fire(m);
+    if (window.commsWire) window.commsWire.fire(m);
+  };
   let turn = 0;
   const volley = () => {
     const live = inProgress();
@@ -1578,7 +1584,8 @@ function renderLearning() {
 
 function renderAll() {
   if (!snap) return;
-  if (window.renderHud) window.renderHud(snap);
+  // A console problem must never blank the rest of the page.
+  try { if (window.renderHud) window.renderHud(snap); } catch (err) { console.error("consoles:", err); }
   renderStatus();
   renderHero();
   renderTerminal();

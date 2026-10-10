@@ -1,8 +1,11 @@
 "use strict";
 
-// The side HUD panels around the brains. Everything here is decoration made of real data:
-// every ring, cell, blip and bar is computed from the live snapshot, and hovering shows what it is.
-// Uses el(), relTime(), openDetail(), revealOrder(), allJobs() and STATE_LABELS from app.js.
+// The three consoles under the Death Stars, one layout each: key numbers, one big live graphic, a short list.
+// claude.exec: a live code stream of what Claude is doing now, a 24-hour heat strip, the latest outcomes.
+// comms: an animated wire between Claude, MAC, Windows and Codex (each message travels as a packet); click a
+// station or a filter to narrow the feed. mac.command: the age radar and the orders as columns.
+// Everything is real data from the snapshot; everything opens what it shows. Uses el(), md(), relTime(),
+// clock(), openDetail(), revealOrder(), allJobs(), openDecisions(), ui, snap and brains from app.js.
 
 const HUD_COLORS = {
   running: "#f4f7fa", waiting: "#f4f7fa", done: "#9fe8c4", followed_up: "#7ff3e4", cleared: "#7ff3c4",
@@ -10,13 +13,10 @@ const HUD_COLORS = {
   prepared: "#80808b",
   OPEN: "#6fd7ff", RUNNING: "#f4f7fa", BLOCKED: "#ff7b80", PARKED: "#80808b", DONE: "#9fe8c4", NOTE: "#80808b",
 };
-const HUD_GLYPHS = {
-  running: "RUN", waiting: "WAIT", done: "DONE", followed_up: "F-UP", cleared: "CLRD", blocked: "BLKD", error: "ERR",
-  gate_failed: "GATE", stalled: "STALL", no_report: "NORPT", prepared: "PREP",
-  OPEN: "OPEN", RUNNING: "RUN", BLOCKED: "BLKD", PARKED: "PARK", DONE: "DONE", NOTE: "NOTE",
-};
 const DAY_MS = 24 * 3600 * 1000;
 const SVG_NS = "http://www.w3.org/2000/svg";
+const STUCK = ["blocked", "error", "gate_failed", "stalled", "no_report"];
+const calmMotion = () => document.documentElement.classList.contains("calm");
 
 function svg(tag, attrs, ...kids) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -32,97 +32,268 @@ function svg(tag, attrs, ...kids) {
 
 const tip = (text) => svg("title", {}, text);
 const ageMs = (iso) => (iso ? Date.now() - Date.parse(iso) : Infinity);
-const shortAge = (iso) => relTime(iso).replace(" ago", "").replace("just now", "now");
 const hudColor = (state) => HUD_COLORS[state] || "#9aa3ad";
-
-// The page's security policy blocks style="" attributes, so colors are set through the style object instead.
-function tinted(node, color) {
-  node.style.setProperty("--c", color);
-  return node;
-}
-
-function glyph(state) {
-  // Resolved and blocked glyphs are solid so they jump out; open and running stay outlined.
-  const solid = ["good", "bad"].includes(family(state)) ? " solid" : "";
-  return tinted(el("span", { class: `hud-glyph${solid}` }, HUD_GLYPHS[state] || state), hudColor(state));
-}
 
 function hudHead(title, sub) {
   return el("div", { class: "hud-head" },
-    el("span", { class: "hud-blink", "aria-hidden": "true" }),
     el("span", { class: "hud-title" }, title),
     sub ? el("span", { class: "hud-sub" }, sub) : null,
   );
 }
 
-// ---------- graphics ----------
-
-// A ring split into colored arcs. parts: [{value, color, label}]
-function ring(parts, centerBig, centerSmall, label) {
-  const total = parts.reduce((s, p) => s + p.value, 0);
-  const r = 34;
-  const c = 2 * Math.PI * r;
-  const arcs = [];
-  let offset = 0;
-  for (const p of parts) {
-    if (!p.value) continue;
-    const len = (p.value / total) * c;
-    arcs.push(svg("circle", {
-      cx: 45, cy: 45, r, fill: "none", stroke: p.color, "stroke-width": 7,
-      "stroke-dasharray": `${Math.max(0, len - 1.5)} ${c}`, "stroke-dashoffset": -offset, transform: "rotate(-90 45 45)",
-      class: "hud-arc",
-    }, tip(`${p.label}: ${p.value}`)));
-    offset += len;
-  }
-  const ticks = [];
-  for (let i = 0; i < 48; i++) {
-    const a = (i / 48) * Math.PI * 2;
-    const r1 = i % 4 === 0 ? 40 : 42;
-    ticks.push(svg("line", {
-      x1: 45 + Math.cos(a) * r1, y1: 45 + Math.sin(a) * r1, x2: 45 + Math.cos(a) * 44, y2: 45 + Math.sin(a) * 44,
-      class: "hud-tick",
-    }));
-  }
-  const summary = parts.map((p) => `${p.label} ${p.value}`).join(", ");
-  return el("figure", { class: "hud-ring" },
-    svg("svg", { viewBox: "0 0 90 90", role: "img", "aria-label": `${label}: ${summary}` },
-      svg("circle", { cx: 45, cy: 45, r, fill: "none", class: "hud-track", "stroke-width": 7 }),
-      ...ticks,
-      svg("g", { class: "hud-spin" }, svg("circle", { cx: 45, cy: 45, r: 26, fill: "none", class: "hud-dash" })),
-      ...arcs,
-      svg("text", { x: 45, y: 46, class: "hud-big", "text-anchor": "middle" }, centerBig),
-      svg("text", { x: 45, y: 58, class: "hud-small", "text-anchor": "middle" }, centerSmall),
-    ),
-    el("figcaption", {}, label),
-  );
+// A row of key numbers: [value, label, tone]. tone: ok / bad / warn / hot / info / dim.
+function kpis(items) {
+  return el("div", { class: "kpis" }, items.map(([v, label, tone, title]) =>
+    el("span", { class: `kpi kpi-${tone || "info"}`, title: title || label }, el("b", {}, String(v)), el("i", {}, label))));
 }
 
-// One hexagon per recent job, newest first, colored by state.
-function hexGrid(jobs) {
-  const size = 7;
-  const w = Math.sqrt(3) * size;
-  const cols = 15;
-  const cells = jobs.slice(0, 60).map((job, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const cx = 6 + col * w + (row % 2 ? w / 2 : 0);
-    const cy = 8 + row * size * 1.5;
-    const pts = Array.from({ length: 6 }, (_, k) => {
-      const a = (Math.PI / 3) * k + Math.PI / 6;
-      return `${(cx + Math.cos(a) * (size - 1)).toFixed(1)},${(cy + Math.sin(a) * (size - 1)).toFixed(1)}`;
-    }).join(" ");
-    const cell = svg("polygon", {
-      points: pts, fill: hudColor(job.state), class: `hud-hex${job.state === "running" ? " hot" : ""}`,
-    }, tip(`${HUD_GLYPHS[job.state] || job.state} · ${job.id}: ${job.title || ""}`));
-    cell.style.animationDelay = `${(i * 37) % 900}ms`;
-    return cell;
+// ---------- claude.exec: the live code stream ----------
+
+// Lines shown last time; a line not in it types itself in. Rebuilt every render, so it never grows.
+let streamSeen = new Set();
+let streamNow = new Set();
+let streamPrimed = false;
+
+function streamLine(key, cls, ...parts) {
+  const fresh = streamPrimed && !streamSeen.has(key);
+  streamNow.add(key);
+  return el("span", { class: `cs-line ${cls}${fresh ? " cs-new" : ""}` }, ...parts);
+}
+
+function prompt(who, job, extra) {
+  return [el("span", { class: "cs-user" }, who), el("span", { class: "cs-dim" }, " ~/"),
+    el("span", { class: "cs-job" }, job), el("span", { class: "cs-dim" }, " $ "), extra ? el("span", { class: "cs-cmd" }, extra) : null];
+}
+
+// What Claude is doing now, as a terminal: each running job's prompt and its latest tool calls and words.
+function codeStream(jobs) {
+  streamNow = new Set();
+  const blocks = [];
+  const running = jobs.filter((j) => j.state === "running" || j.state === "waiting");
+  for (const j of running.slice(0, 2)) {
+    const lines = [streamLine(`p:${j.id}`, "cs-prompt", ...prompt("claude@mac", j.id, [j.model, j.effort].filter(Boolean).join(" ") || (j.kind === "oneshot" ? "one-shot" : "")))];
+    for (const a of (j.activity || []).slice(-5)) {
+      const k = `${j.id}:${a.kind}:${a.name || ""}:${a.summary || a.text || ""}`;
+      lines.push(a.kind === "tool"
+        ? streamLine(k, "cs-tool", el("span", { class: "cs-fn" }, a.name), el("span", { class: "cs-arg" }, ` ${a.summary || ""}`))
+        : streamLine(k, "cs-said", el("span", { class: "cs-comment" }, `# ${a.text || ""}`)));
+    }
+    if (!(j.activity || []).length) lines.push(streamLine(`w:${j.id}`, "cs-said", el("span", { class: "cs-comment" }, j.kind === "oneshot" ? "# waiting for the result" : "# starting…")));
+    blocks.push(el("button", { type: "button", class: "cs-block", "data-key": `cs:${j.kind}:${j.id}`, title: `${j.id}: open the job`, onclick: () => openDetail(j.kind, j.id, j.title) }, ...lines));
+  }
+  const beat = snap.windows || {};
+  if (beat.fresh && beat.job) {
+    blocks.push(el("div", { class: "cs-block cs-win" },
+      streamLine(`p:win:${beat.job}`, "cs-prompt", ...prompt("claude@windows", beat.job)),
+      streamLine(`win:${beat.job}:${beat.last_log_line || ""}`, "cs-said", el("span", { class: "cs-comment" }, `# ${plain(beat.last_log_line || "working")}`))));
+  }
+  if (!blocks.length) {
+    const last = jobs.find((j) => ["done", "resolved", "blocked", "stalled"].includes(j.lifecycle));
+    if (last) {
+      blocks.push(el("button", { type: "button", class: "cs-block cs-past", "data-key": `cs:${last.kind}:${last.id}`, onclick: () => openDetail(last.kind, last.id, last.title) },
+        streamLine(`last:${last.id}`, "cs-prompt", ...prompt("claude@mac", last.id, "last run")),
+        streamLine(`lastr:${last.id}:${last.updated_at}`, last.lifecycle === "blocked" ? "cs-err" : "cs-ok",
+          `${last.lifecycle === "blocked" || last.lifecycle === "stalled" ? "✖" : "✔"} ${plain(last.report_headline || last.result_preview || last.lifecycle || "")}`)));
+    }
+  }
+  streamPrimed = true;
+  streamSeen = streamNow;
+  const idle = el("span", { class: "cs-line cs-prompt cs-idle" }, ...prompt("claude@mac", running.length ? "…" : "idle"), el("span", { class: "cs-cursor", "aria-hidden": "true" }));
+  return el("div", { class: "cs", role: "log", "aria-label": "What Claude is doing now" }, ...blocks, idle);
+}
+
+// ---------- claude.exec: the 24-hour heat strip ----------
+
+// One cell per hour for Claude (this Mac) and Windows: brighter = more jobs running that hour; red dot = a job
+// ended blocked. From the same data as the Active now timeline; a click opens that timeline at 24 h.
+function heatStrip() {
+  const t = snap.timeline;
+  if (!t) return null;
+  // 24 clock hours, the last one still running: each cell is 3 PM–4 PM, not a rolling hour.
+  const now = Date.now(), hour = 3600000, from = Math.floor(now / hour) * hour - 23 * hour;
+  // Windows' row has its Claude jobs and the Codex picture jobs that run there.
+  const rows = [["claude", "CLAUDE", [255, 150, 40]], ["windows", "WINDOWS", [167, 139, 250]]];
+  const W = 24 * 9, cells = [];
+  rows.forEach(([key, name, rgb], r) => {
+    const time = (iso, fallback) => { const v = Date.parse(iso || ""); return Number.isNaN(v) ? fallback : v; };
+    const bars = ((t.lanes || {})[key] || []).map((b) => {
+      const e = time(b.end, now);
+      return { ...b, s: time(b.start, e), e };
+    });
+    cells.push(svg("text", { x: 0, y: 9 + r * 14, class: "hs-name" }, name));
+    for (let i = 0; i < 24; i++) {
+      const h0 = from + i * hour, h1 = h0 + hour;
+      const on = bars.filter((b) => b.s < h1 && b.e >= h0);
+      const blocked = bars.filter((b) => b.state === "blocked" && b.end && b.e >= h0 && b.e < h1);
+      const a = on.length ? 0.22 + Math.min(1, on.length / 3) * 0.7 : 0.06;
+      const span = `${new Date(h0).toLocaleTimeString([], { hour: "numeric" })}–${new Date(h1).toLocaleTimeString([], { hour: "numeric" })}`;
+      const label = `${name} ${span}: ${on.length ? on.map((b) => b.label).slice(0, 6).join(", ") : "nothing running"}${blocked.length ? ` · blocked: ${blocked.map((b) => b.label).join(", ")}` : ""}`;
+      cells.push(svg("rect", { x: 56 + i * 9, y: r * 14, width: 8, height: 11, rx: 2, fill: `rgba(${rgb.join(",")},${a.toFixed(2)})`, class: "hs-cell" }, tip(label)));
+      if (blocked.length) cells.push(svg("circle", { cx: 60 + i * 9, cy: r * 14 + 5.5, r: 2, fill: "#ff5a52" }, tip(label)));
+    }
   });
-  const height = 8 + Math.ceil(Math.max(cells.length, 1) / cols) * size * 1.5 + 4;
-  return svg("svg", {
-    viewBox: `0 0 ${6 + cols * w + w / 2} ${height}`, class: "hud-hexes", role: "img",
-    "aria-label": `Last ${cells.length} jobs, one cell each, colored by status`,
-  }, ...cells);
+  const fig = el("button", {
+    type: "button", class: "hs", "aria-label": "Jobs per hour over the last 24 hours. Open the timeline.",
+    "data-key": "hs",
+    onclick: () => {
+      ui.activeView = "timeline"; ui.tlHours = 24;
+      store.set("brain-active-view", "timeline"); store.set("brain-tl-hours", "24");
+      renderRunning(); document.getElementById("running-panel").scrollIntoView({ behavior: "smooth", block: "start" }); },
+  }, svg("svg", { viewBox: `0 0 ${56 + W} 28`, role: "img", "aria-hidden": "true" }, ...cells),
+  el("span", { class: "hs-cap" }, "last 24 h · brighter = busier · red = ended blocked · Windows row includes Codex · click for the timeline"));
+  return fig;
 }
+
+// The latest finished or stuck jobs, one line each.
+function outcomes(jobs) {
+  const list = jobs.filter((j) => ["done", "resolved", "blocked", "stalled"].includes(j.lifecycle)).slice(0, 4);
+  if (!list.length) return null;
+  return el("ol", { class: "oc" }, list.map((j) => {
+    const bad = j.lifecycle === "blocked" || j.lifecycle === "stalled";
+    return el("li", {}, el("button", { type: "button", class: "oc-row", "data-key": `oc:${j.kind}:${j.id}`, onclick: () => openDetail(j.kind, j.id, j.title) },
+      el("span", { class: `oc-mark ${bad ? "bad" : "ok"}` }, bad ? "✖" : "✔"),
+      el("span", { class: "oc-id" }, j.id),
+      el("span", { class: "oc-txt" }, plain(j.owner_mark ? j.action_note : j.report_headline || j.title || "")),
+      el("span", { class: "oc-age" }, relTime(j.updated_at).replace(" ago", ""))));
+  }));
+}
+
+// ---------- comms: the wire ----------
+
+const WIRE = {
+  nodes: { claude: [80, 58, "CLAUDE", "#ff9628"], mac: [320, 58, "MAC", "#6fd7ff"], windows: [560, 58, "WINDOWS", "#a78bfa"], codex: [445, 134, "CODEX", "#3fe0a8"] },
+  links: { claude: ["claude", "mac", "M 112 58 Q 200 28 288 58"], windows: ["mac", "windows", "M 352 58 Q 440 28 528 58"], codex: ["codex", "mac", "M 426 120 Q 378 108 346 82"] },
+};
+let wireSvg = null;
+const wirePaths = {};
+
+function linkOf(m) {
+  if (m.direction === "codex") return "codex";
+  return m.machine === "windows" ? "windows" : "claude";
+}
+
+function buildWire() {
+  const g = [];
+  for (const [key, [, , d]] of Object.entries(WIRE.links)) {
+    const path = svg("path", { id: `wire-${key}`, d, class: "wr-link" });
+    wirePaths[key] = path;
+    const ends = { claude: "Claude and MAC", windows: "MAC and Windows", codex: "Codex and MAC" }[key];
+    g.push(svg("g", { class: `wr-l wr-l-${key}`, "data-link": key, tabindex: 0, role: "button", "aria-pressed": "false", "aria-label": `Messages between ${ends}: show them` },
+      svg("path", { d, class: "wr-hit" }), path, svg("path", { d, class: "wr-flow" }),
+      svg("text", { class: "wr-count", "data-count": key, "text-anchor": "middle" })));
+  }
+  for (const [key, [x, y, name, color]] of Object.entries(WIRE.nodes)) {
+    const r = key === "codex" ? 15 : 27;
+    g.push(svg("g", { class: `wr-n wr-n-${key}`, "data-node": key, tabindex: 0, role: "button", "aria-pressed": "false", "aria-label": key === "mac" ? "MAC: show all messages" : `${name}: show its messages` },
+      svg("circle", { cx: x, cy: y, r: r + 6, class: "wr-halo", stroke: color }),
+      svg("circle", { cx: x, cy: y, r, class: "wr-core", stroke: color }),
+      svg("text", { x, y: y + 4, class: "wr-name", fill: color, "text-anchor": "middle" }, name),
+      svg("text", { x, y: y + r + 16, class: "wr-sub", "data-sub": key, "text-anchor": "middle" })));
+  }
+  wireSvg = svg("svg", { viewBox: "0 0 640 168", class: "wire", role: "group", "aria-label": "Messages between Claude, MAC, Windows and Codex" }, ...g);
+  const pick = (target) => {
+    const n = target.closest("[data-node], [data-link]");
+    if (!n) return;
+    const key = n.getAttribute("data-node") || n.getAttribute("data-link");
+    setCommsFilter(key === "mac" ? "all" : key);
+  };
+  wireSvg.addEventListener("click", (ev) => pick(ev.target));
+  wireSvg.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(ev.target); } });
+  return wireSvg;
+}
+
+function updateWire(messages) {
+  if (!wireSvg) return;
+  const day = messages.filter((m) => ageMs(m.at) < DAY_MS);
+  const hour = day.filter((m) => ageMs(m.at) < 3600000);
+  for (const key of Object.keys(WIRE.links)) {
+    const ms = day.filter((m) => linkOf(m) === key);
+    const out = ms.filter((m) => m.direction === "to_claude").length, back = ms.length - out;
+    const busy = hour.some((m) => linkOf(m) === key);
+    const label = key === "codex" ? `${ms.length} today` : `▶ ${out}  ◀ ${back}`;
+    const text = wireSvg.querySelector(`[data-count="${key}"]`);
+    if (!text.hasAttribute("x")) {
+      // Placed once (the paths never move). Codex's count sits beside its node, clear of MAC's label; the others ride
+      // above the middle of their link.
+      const p = wirePaths[key].getPointAtLength(wirePaths[key].getTotalLength() * (key === "codex" ? 0.15 : 0.5));
+      text.setAttribute("x", (p.x + (key === "codex" ? 52 : 0)).toFixed(0));
+      text.setAttribute("y", (p.y + (key === "codex" ? 4 : -9)).toFixed(0));
+    }
+    text.textContent = label;
+    const g = wireSvg.querySelector(`.wr-l-${key}`);
+    g.classList.toggle("busy", busy);
+    g.classList.toggle("on", ui.commsFilter === key);
+    g.setAttribute("aria-pressed", String(ui.commsFilter === key));
+  }
+  const counts = { claude: 0, mac: 0, windows: 0, codex: 0 };
+  for (const m of hour) {
+    const link = linkOf(m);
+    counts.mac += 1;
+    counts[link === "claude" ? "claude" : link] += 1;
+  }
+  for (const key of Object.keys(WIRE.nodes)) {
+    wireSvg.querySelector(`[data-sub="${key}"]`).textContent = `${counts[key]} · last hour`;
+    const on = ui.commsFilter === key || (key === "mac" && ui.commsFilter === "all");
+    const n = wireSvg.querySelector(`.wr-n-${key}`);
+    n.classList.toggle("on", on);
+    n.setAttribute("aria-pressed", String(on));
+  }
+}
+
+// A message travels along its link as a packet in its job's colour; with Calm on, the receiving station glows.
+function firePacket(m) {
+  if (!wireSvg || !m) return;
+  const link = linkOf(m);                                      // also the station at the far end from MAC
+  const sender = m.direction === "to_claude" ? "mac" : link;  // codex and replies come in to MAC
+  const receiver = sender === "mac" ? link : "mac";
+  const forward = WIRE.links[link][0] === sender;             // each path is drawn from links[key][0] to [1]
+  const node = wireSvg.querySelector(`.wr-n-${receiver}`);
+  if (node) {
+    // The receiving station lights up for 1.2 s: a plain class, so it shows with Calm on too (no animation needed).
+    node.classList.add("hit");
+    clearTimeout(node.hitTimer);
+    node.hitTimer = setTimeout(() => node.classList.remove("hit"), 1200);
+  }
+  if (calmMotion()) return;
+  const key = window.BrainsVisual && brains ? brains.keyOf(m) : null;
+  const color = (key && window.Volley.jobColor(key)) || "#e8f6ff";
+  const anim = svg("animateMotion", { dur: "1.1s", begin: "indefinite", fill: "freeze", calcMode: "linear", keyPoints: forward ? "0;1" : "1;0", keyTimes: "0;1" },
+    svg("mpath", { href: `#wire-${link}` }));
+  const packet = svg("g", { class: "wr-packet" }, svg("circle", { r: 9, fill: color, class: "wr-glow" }), svg("circle", { r: 3.2, fill: "#fff" }), anim);
+  wireSvg.append(packet);
+  anim.beginElement();
+  setTimeout(() => packet.remove(), 1300);
+}
+
+function setCommsFilter(key) {
+  ui.commsFilter = ui.commsFilter === key ? "all" : key;
+  keepFocus(() => renderCommsFilters());
+  updateWire(snap.messages || []);
+  if (typeof renderTerminal === "function") renderTerminal();
+}
+
+const COMMS_FILTERS = [["all", "All"], ["claude", "Claude"], ["windows", "Windows"], ["codex", "Codex"], ["blocked", "Needs a look"]];
+
+// The feed filter, shared with renderTerminal in app.js.
+function commsMatch(m) {
+  const f = ui.commsFilter || "all";
+  if (f === "all") return true;
+  if (f === "blocked") return m.blocked && !m.cleared;
+  return linkOf(m) === f;
+}
+
+function renderCommsFilters() {
+  const box = document.getElementById("comms-filters");
+  if (!box) return;
+  const ms = (snap.messages || []).filter((m) => m.at && matches(m.text, m.kind));   // what the feed can show
+  box.replaceChildren(...COMMS_FILTERS.map(([key, label]) => {
+    const n = key === "all" ? ms.length : ms.filter((m) => (key === "blocked" ? m.blocked && !m.cleared : linkOf(m) === key)).length;
+    return el("button", { type: "button", "data-key": `cf:${key}`, class: `cf${(ui.commsFilter || "all") === key ? " on" : ""}`, "aria-pressed": String((ui.commsFilter || "all") === key), onclick: () => setCommsFilter(key) },
+      label, el("span", { class: "cf-n" }, String(n)));
+  }));
+}
+
+// ---------- mac.command ----------
 
 // Open work orders as radar blips: angle from the order, distance from its age (outer ring = 14 days).
 function radar(orders) {
@@ -133,10 +304,11 @@ function radar(orders) {
     const a = seed % (Math.PI * 2);
     const x = 64 + Math.cos(a) * dist;
     const y = 64 + Math.sin(a) * dist;
-    return svg("g", { class: "hud-blip", "data-id": e.id, tabindex: 0, role: "button",
+    const color = e.action === "needs_anthony" ? "#ff5a52" : hudColor(e.state);
+    return svg("g", { class: "hud-blip", "data-id": e.id, "data-key": `blip:${e.id}`, tabindex: 0, role: "button",
       "aria-label": `${e.state} ${e.wo !== null ? `WO ${e.wo}` : ""} ${e.title}` },
-      svg("circle", { cx: x, cy: y, r: e.state === "BLOCKED" ? 3.6 : 2.6, fill: hudColor(e.state) }),
-      svg("circle", { cx: x, cy: y, r: 6, fill: "none", stroke: hudColor(e.state), class: "hud-ping" }),
+      svg("circle", { cx: x, cy: y, r: e.action === "needs_anthony" ? 3.8 : 2.6, fill: color }),
+      svg("circle", { cx: x, cy: y, r: 6, fill: "none", stroke: color, class: "hud-ping" }),
       tip(`${e.state}${e.wo !== null ? ` · WO #${e.wo}` : ""} · ${e.title} · ${e.date || "undated"}`),
     );
   });
@@ -151,146 +323,88 @@ function radar(orders) {
       ...rings,
       svg("line", { x1: 4, y1: 64, x2: 124, y2: 64, class: "hud-radar-ring" }),
       svg("line", { x1: 64, y1: 4, x2: 64, y2: 124, class: "hud-radar-ring" }),
-      svg("g", { class: "hud-sweep" },
-        svg("path", { d: "M64 64 L64 6 A58 58 0 0 1 105 23 Z", class: "hud-sweep-fill" }),
-      ),
+      svg("g", { class: "hud-sweep" }, svg("path", { d: "M64 64 L64 6 A58 58 0 0 1 105 23 Z", class: "hud-sweep-fill" })),
       ...blips,
     ),
-    el("figcaption", {}, "Open orders · age radar · 14 d edge"),
+    el("figcaption", {}, "age radar · 14 d edge"),
   );
 }
 
-// Messages per hour, last 24 h: blue up for MAC to Claude, orange down for Claude to MAC.
-function traffic(messages) {
-  const now = Date.now();
-  const toClaude = new Array(24).fill(0);
-  const toMac = new Array(24).fill(0);
-  for (const m of messages) {
-    const age = ageMs(m.at);
-    if (age < 0 || age >= DAY_MS) continue;
-    const slot = 23 - Math.floor(age / 3600000);
-    (m.direction === "to_claude" ? toClaude : toMac)[slot] += 1;
-  }
-  const peak = Math.max(1, ...toClaude, ...toMac);
-  const bars = [];
-  for (let i = 0; i < 24; i++) {
-    const hour = new Date(now - (23 - i) * 3600000).getHours();
-    const up = (toClaude[i] / peak) * 26;
-    const down = (toMac[i] / peak) * 26;
-    bars.push(svg("g", {},
-      svg("rect", { x: 4 + i * 8, y: 30 - up, width: 5, height: Math.max(up, 0.6), class: "hud-bar-up" }),
-      svg("rect", { x: 4 + i * 8, y: 31, width: 5, height: Math.max(down, 0.6), class: "hud-bar-down" }),
-      tip(`${String(hour).padStart(2, "0")}:00 · MAC → Claude ${toClaude[i]} · Claude → MAC ${toMac[i]}`),
-    ));
-  }
-  const sum = (a) => a.reduce((s, v) => s + v, 0);
-  return el("figure", { class: "hud-traffic" },
-    svg("svg", { viewBox: "0 0 196 60", role: "img",
-      "aria-label": `Last 24 hours: ${sum(toClaude)} messages MAC to Claude, ${sum(toMac)} Claude to MAC` },
-      svg("line", { x1: 0, y1: 30.5, x2: 196, y2: 30.5, class: "hud-axis" }),
-      ...bars,
-    ),
-    el("figcaption", {}, `Traffic 24 h · ▲ MAC→Claude ${sum(toClaude)} · ▼ Claude→MAC ${sum(toMac)}`),
-  );
-}
-
-function stat(value, label, state) {
-  return tinted(el("div", { class: "hud-stat" },
-    el("span", { class: "hud-stat-v" }, String(value)),
-    el("span", { class: "hud-stat-l" }, label),
-  ), hudColor(state));
-}
-
-// ---------- tables ----------
-
-function jobTable(jobs) {
-  const rows = jobs.map((j) =>
-    el("tr", { tabindex: 0, onclick: () => openDetail(j.kind, j.id, j.title),
-      onkeydown: (ev) => ev.key === "Enter" && openDetail(j.kind, j.id, j.title) },
-      el("td", {}, glyph(j.state)),
-      el("td", { class: "hud-mono" }, j.id, j.action === "needs_anthony" ? el("span", { class: "hud-needs" }, "▲") : null),
-      el("td", { class: "hud-desc" }, md(
-        j.state === "cleared" ? `${j.title} — ✔ cleared by MAC`
-          : j.state === "followed_up" ? `${j.title} — ↻ MAC handling`
-            : j.report_headline && j.kind === "folder" ? `${j.title} — ${j.report_headline}` : j.title)),
-      el("td", { class: "hud-mono hud-dim" }, shortAge(j.updated_at)),
-    )
-  );
-  return el("table", { class: "hud-table" },
-    el("caption", { class: "visually-hidden" }, "Claude's latest jobs: status, id, description, age"),
-    el("thead", {}, el("tr", {}, el("th", {}, "ST"), el("th", {}, "ID"), el("th", {}, "TASK / RESULT"), el("th", {}, "AGE"))),
-    el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: 4 }, "No jobs yet."))),
-  );
-}
-
-function orderTable(orders) {
-  const rows = orders.map((e) =>
-    el("tr", { tabindex: 0, onclick: () => revealOrder(e.id), onkeydown: (ev) => ev.key === "Enter" && revealOrder(e.id) },
-      el("td", {}, glyph(e.state)),
-      el("td", { class: "hud-mono" }, e.wo !== null ? `#${String(e.wo).padStart(3, "0")}` : "·",
-        e.action === "needs_anthony" ? el("span", { class: "hud-needs" }, "▲") : null),
-      el("td", { class: "hud-desc" }, md(e.title.replace(/^WO from MAC\s*#\s*\d+\s*[-—–:]\s*/, "")),
-        el("span", { class: `hud-status act-${e.action}` }, `${ACTION_LABEL[e.action] || ""}${e.action_note ? ` · ${e.action_note}` : ""}`)),
-      el("td", { class: "hud-mono hud-dim" }, e.replies.length ? `${e.replies.length}↔` : ""),
-    )
-  );
-  return el("table", { class: "hud-table" },
-    el("caption", { class: "visually-hidden" }, "MAC's live work orders, NEEDS ANTHONY first: status, number, description, replies"),
-    el("thead", {}, el("tr", {}, el("th", {}, "ST"), el("th", {}, "WO"), el("th", {}, "ORDER / STATUS"), el("th", {}, "RE"))),
-    el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: 4 }, "No open orders."))),
-  );
+// The orders as four columns: what needs Anthony, what runs, what waits, what is parked.
+function orderColumns(orders) {
+  // Each order goes in exactly one column, so the columns add up to the open-orders number above.
+  const column = (e) => e.action === "needs_anthony" ? "needs" : e.state === "PARKED" ? "park"
+    : e.state === "RUNNING" || e.action === "in_progress" ? "run" : "queue";
+  const cols = [["needs", "NEEDS YOU"], ["run", "RUNNING"], ["queue", "QUEUED"], ["park", "PARKED"]]
+    .map(([key, name]) => [key, name, orders.filter((e) => column(e) === key)]);
+  const label = (e) => (e.wo !== null ? `#${String(e.wo).padStart(3, "0")}` : plain(e.title).slice(0, 14));
+  return el("div", { class: "kb" }, cols.map(([cls, name, list]) => el("section", { class: `kb-col kb-${cls}` },
+    el("h3", {}, name, el("span", {}, String(list.length))),
+    list.length ? el("ul", {}, list.slice(0, 5).map((e) => el("li", {}, el("button", {
+      type: "button", class: "kb-chip", "data-key": `kb:${e.id}`, title: `${plain(e.title)}${e.action_note ? ` · ${e.action_note}` : ""}`,
+      onclick: () => revealOrder(e.id),
+    }, el("b", {}, label(e)), el("span", {}, plain(e.title).replace(/^WO from MAC\s*#?\s*\d*\s*[-—–:]\s*/, "")))))) : el("p", { class: "kb-none" }, "none"),
+    list.length > 5 ? el("p", { class: "kb-more" }, `+${list.length - 5} more`) : null)));
 }
 
 // ---------- panels ----------
 
-function renderHud(s) {
+// The consoles are rebuilt on every update: put keyboard focus back on the same control, and keep the code stream
+// where it was scrolled.
+function keepFocus(render) {
+  const active = document.activeElement;
+  const key = active && active.closest && active.closest(".consoles") ? active.getAttribute("data-key") : null;
+  const stream = document.querySelector("#hud-claude .cs");
+  const scroll = stream ? stream.scrollTop : null;
+  render();
+  if (scroll !== null) { const fresh = document.querySelector("#hud-claude .cs"); if (fresh) fresh.scrollTop = scroll; }
+  if (key) { const again = document.querySelector(`.consoles [data-key="${CSS.escape(key)}"]`); if (again) again.focus({ preventScroll: true }); }
+}
+
+function renderHud(s) { keepFocus(() => drawHud(s)); }
+
+function drawHud(s) {
   const jobs = allJobs();
   const day = jobs.filter((j) => ageMs(j.updated_at) < DAY_MS);
-  const count = (states) => day.filter((j) => states.includes(j.state)).length;
   const finished = day.filter((j) => typeof j.duration_s === "number");
   const avgMin = finished.length ? Math.round(finished.reduce((a, j) => a + j.duration_s, 0) / finished.length / 60) : null;
-  // One-shots carry cost_usd; job folders carry it in their final result.
   const jobCost = (j) => (typeof j.cost_usd === "number" ? j.cost_usd : j.last_result && typeof j.last_result.cost_usd === "number" ? j.last_result.cost_usd : 0);
   const cost = day.reduce((a, j) => a + jobCost(j), 0);
+  const running = jobs.filter((j) => j.state === "running" || j.state === "waiting").length;
+  const stuck = day.filter((j) => STUCK.includes(j.state) && !j.owner_mark).length;
 
   document.getElementById("hud-claude").replaceChildren(
     hudHead("claude.exec", `${jobs.length} jobs on record`),
-    el("div", { class: "hud-row" },
-      ring([
-        { value: count(["done", "followed_up", "cleared"]), color: HUD_COLORS.done, label: "Done or resolved" },
-        { value: count(["running", "waiting"]), color: HUD_COLORS.running, label: "Running" },
-        { value: count(["blocked", "error", "gate_failed", "stalled", "no_report"]), color: HUD_COLORS.blocked, label: "Stuck" },
-      ], day.length, "24 H", "Outcomes · last 24 h"),
-      ring([
-        { value: Math.min(avgMin || 0, 120), color: "#ff9628", label: `Avg minutes per job (${finished.length} finished in 24 h)` },
-        { value: Math.max(0, 120 - Math.min(avgMin || 0, 120)), color: "rgba(255,150,40,0.12)", label: "Of a 2 h scale" },
-      ], avgMin === null ? "—" : `${avgMin}m`, avgMin === null ? "NO DATA" : "AVG", "Avg job run · 24 h"),
-      el("div", { class: "hud-stats" },
-        stat(`$${cost.toFixed(0)}`, "list-price est · 24 h", "done"),
-        stat(count(["running", "waiting"]), "running now", "running"),
-        stat(count(["blocked", "error", "gate_failed", "stalled", "no_report"]), "stuck · 24 h", "blocked"),
-      ),
-    ),
-    el("div", { class: "hud-scroll" }, jobTable(byAction(jobs).slice(0, 9))),
-    el("figure", { class: "hud-hexfig" }, hexGrid(jobs), el("figcaption", {}, "Last 60 jobs · one cell each · hover for detail")),
+    kpis([
+      [day.length, "jobs · 24 h", "info"],
+      [avgMin === null ? "—" : `${avgMin}m`, "avg run", "info", `${finished.length} finished in 24 h`],
+      [`$${cost.toFixed(0)}`, "list price · 24 h", "dim"],
+      [running, "running", running ? "hot" : "dim"],
+      [stuck, "stuck · 24 h", stuck ? "bad" : "ok"],
+    ]),
+    codeStream(jobs),
+    heatStrip(),
+    outcomes(jobs),
   );
 
-  const open = s.inbox.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state));
-  const blocked = open.filter((e) => e.state === "BLOCKED").length;
+  const open = s.inbox.filter((e) => e.action !== "done" && e.state !== "NOTE");
   const comms = s.comms || { events: 0 };
+  const needs = openDecisions().length + open.filter((e) => e.action === "needs_anthony").length;
   document.getElementById("hud-mac").replaceChildren(
     hudHead("mac.command", comms.events ? `grok bot · log ${comms.events} events` : "grok bot · log not started"),
-    el("div", { class: "hud-row" },
-      radar(open),
-      el("div", { class: "hud-stats" },
-        stat(openDecisions().length, "waiting on Anthony", openDecisions().length ? "BLOCKED" : "DONE"),
-        stat(open.length, "open orders", "OPEN"),
-        stat(blocked, "blocked orders", "BLOCKED"),
-      ),
-    ),
-    el("div", { class: "hud-scroll" }, orderTable(byAction(s.inbox.filter((e) => e.action !== "done")).slice(0, 9))),
+    kpis([
+      [needs, "waiting on you", needs ? "bad" : "ok"],
+      [open.length, "open orders", "info"],
+      [open.filter((e) => e.state === "BLOCKED").length, "blocked", open.some((e) => e.state === "BLOCKED") ? "bad" : "ok"],
+    ]),
+    el("div", { class: "hud-row mc-row" }, radar(open.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state))), orderColumns(open)),
   );
-  document.getElementById("comms-traffic").replaceChildren(traffic(s.messages || []));
+
+  const wireBox = document.getElementById("comms-wire");
+  if (wireBox && !wireSvg) wireBox.replaceChildren(buildWire());
+  updateWire(s.messages || []);
+  renderCommsFilters();
 }
 
 window.renderHud = renderHud;
+window.commsWire = { fire: firePacket, match: commsMatch };
