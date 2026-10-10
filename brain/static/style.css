@@ -650,7 +650,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .rec-opt, .rec-res { grid-column: 3; color: var(--muted); font-size: 12px; }
 .rec-declined { opacity: 0.6; }
 
-/* ---------- the WINDOWS box, under Windows' Death Star ---------- */
+/* ---------- a short terminal box under each Death Star (purple for Windows) ---------- */
 .win-box {
   position: absolute; left: 50%; top: 55%; transform: translateX(-50%); z-index: 2; min-width: 230px; max-width: 300px;
   padding: 8px 12px 9px; border-radius: 8px; font: 11.5px/1.6 var(--mono); color: #dfe6ff;
@@ -671,7 +671,23 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .wb-acc { margin-top: 5px; padding-top: 5px; border-top: 1px dashed rgba(167, 139, 250, 0.35); font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; white-space: normal; }
 .wb-acc.yes { color: var(--done); } .wb-acc.no { color: var(--bad-text); } .wb-acc.unknown { color: var(--dim); font-weight: 400; }
 .wb-rules { margin: 4px 0 0; padding-left: 14px; font-size: 9.5px; line-height: 1.45; color: var(--muted); white-space: normal; }
-@media (max-width: 640px) { .win-box { position: static; transform: none; margin: 10px auto; } }
+.wb-rules-fold summary { margin-top: 3px; font-size: 10px; color: var(--dim); cursor: pointer; }
+.wb-rules-fold summary:hover, .wb-rules-fold summary:focus-visible { color: var(--windows); }
+.wb-more { color: var(--dim); font-size: 10.5px; }
+.wb-needs { color: var(--bad-text); }
+.sb-sum { color: var(--muted); font-weight: 600; }
+.win-box.sb-claude { border-color: rgba(255, 150, 40, 0.45); box-shadow: 0 0 24px -10px rgba(255, 150, 40, 0.7); background: rgba(20, 12, 6, 0.82); }
+.win-box.sb-claude .wb-head b, .sb-claude .wb-queued { color: var(--claude); }
+.win-box.sb-claude .wb-acc { border-top-color: rgba(255, 150, 40, 0.35); }
+.win-box.sb-claude .wb-name { color: #ffeede; }
+.win-box.sb-mac { border-color: rgba(110, 215, 255, 0.45); box-shadow: 0 0 24px -10px rgba(110, 215, 255, 0.7); background: rgba(6, 14, 20, 0.82); }
+.win-box.sb-mac .wb-head b, .sb-mac .wb-queued { color: var(--mac); }
+.win-box.sb-mac .wb-acc { border-top-color: rgba(110, 215, 255, 0.35); }
+.win-box.sb-mac .wb-name { color: #e2f4ff; }
+@media (max-width: 640px) {
+  .win-box { position: static; transform: none; margin: 10px auto; }
+  .brains-stage .calm-note { position: static; transform: none; margin: 10px auto 14px; } /* after the boxes, not over them */
+}
 
 /* ---------- readable reports in the job window ---------- */
 .rd {

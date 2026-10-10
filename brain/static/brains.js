@@ -278,29 +278,36 @@
     layout() {
       // Claude on the left, MAC in the middle, Windows on the right: both machines report to MAC.
       const { w, h } = this, { claude: a, mac: b, windows: c } = this.stations;
-      const box = this.canvas.parentElement.querySelector(".win-box");
+      const boxes = [...this.canvas.parentElement.querySelectorAll(".win-box[data-station]")];
       if (w < 640) {
         // Phone width: stacked, Claude on top; the WINDOWS box drops below the canvas (CSS).
         const R = Math.min(w * 0.24, h * 0.095);
         for (const [st, y] of [[a, 0.17], [b, 0.5], [c, 0.83]]) { st.cx = w / 2; st.cy = h * y; st.R = R; }
-        if (box) { box.style.removeProperty("top"); box.style.removeProperty("left"); }
+        for (const box of boxes) { box.style.removeProperty("top"); box.style.removeProperty("left"); }
         this.canvas.parentElement.style.removeProperty("padding-bottom");
         return;
       }
       // Keep clear of the readout boxes: the spin-axis label sits about 1.3 R above the centre, and the name
-      // plates about 1.45 R + 48 px below it. The WINDOWS box goes under Windows' name plate; where it runs
+      // plates about 1.45 R + 48 px below it. Each station's box goes under its name plate; where one runs
       // past the canvas, the stage grows to hold it.
       const top = this.overlayBottom() + 14;
       const R = Math.max(40, Math.min(w * 0.1, (h - top - 56) / 2.75));
       const cy = top + R * 1.3;
       for (const [st, x] of [[a, 0.18], [b, 0.5], [c, 0.82]]) { st.cx = w * x; st.cy = cy; st.R = R; }
-      if (box) {
-        const half = (box.offsetWidth || 260) / 2, boxTop = Math.round(cy + R * 1.42 + 52);
-        box.style.setProperty("left", `${Math.round(Math.min(w - half - 10, c.cx))}px`);
+      const boxTop = Math.round(cy + R * 1.42 + 52);
+      let spill = 0;
+      for (const box of boxes) {
+        const st = this.stations[box.dataset.station];
+        if (!st) continue;
+        const half = (box.offsetWidth || 260) / 2;
+        box.style.setProperty("left", `${Math.round(Math.max(half + 10, Math.min(w - half - 10, st.cx)))}px`);
         box.style.setProperty("top", `${boxTop}px`);
-        const spill = Math.max(0, boxTop + box.offsetHeight + 16 - h);
-        this.canvas.parentElement.style.setProperty("padding-bottom", `${spill}px`);
+        spill = Math.max(spill, boxTop + box.offsetHeight + 16 - h);
       }
+      // the Calm note sits along the stage's bottom edge: keep the boxes clear of it
+      const note = this.canvas.parentElement.querySelector(".calm-note");
+      if (note && spill > 0) spill += note.offsetHeight + 8;
+      this.canvas.parentElement.style.setProperty("padding-bottom", `${Math.max(0, spill)}px`);
     }
 
     // The lowest edge of anything drawn over the top of the canvas (readouts, sample banner), in canvas px.

@@ -1119,28 +1119,80 @@ function renderAudit() {
 }
 
 // The WINDOWS box between the Death Stars: a short terminal list from windows-status.json.
+// A short terminal list under each Death Star: what is running, needs Anthony or waits, at most BOX_LINES
+// lines and a "+N more" line, then one summary line.
+const BOX_LINES = 5;
+const boxDots = (name, width = 18) => {
+  const n = name.length > width ? `${name.slice(0, width - 1)}…` : name;
+  return `${n} ${".".repeat(Math.max(2, width - n.length))}`;
+};
+const boxLine = (name, state, cls) => el("div", { class: "wb-line" },
+  el("span", { class: "wb-name" }, boxDots(name)), " ", el("span", { class: `wb-st wb-${cls}` }, state));
+function boxLines(items, empty) {
+  if (!items.length) return [el("div", { class: "wb-line wb-none" }, empty)];
+  const out = items.slice(0, BOX_LINES).map((i) => boxLine(i.name, i.state, i.cls));
+  const rest = items.slice(BOX_LINES);
+  if (rest.length) {
+    const words = [...new Set(rest.map((i) => i.state.toLowerCase()))].join(" or ");
+    out.push(el("div", { class: "wb-line wb-more" }, `+${rest.length} more ${words}`));
+  }
+  return out;
+}
+const STATE_WORD = { needs_anthony: ["NEEDS YOU", "needs"], in_progress: ["RUNNING", "running"], queued: ["QUEUED", "queued"] };
+const STATE_RANK = { needs_anthony: 0, in_progress: 1, queued: 2 };
+
+function nodeBox(id, name, nodes, summary) {
+  const live = [];
+  const seen = new Set();
+  for (const n of nodes) {
+    if (!STATE_WORD[n.action] || seen.has(n.label)) continue;
+    seen.add(n.label);
+    live.push({ name: n.label, state: STATE_WORD[n.action][0], cls: STATE_WORD[n.action][1], rank: STATE_RANK[n.action] });
+  }
+  live.sort((a, b) => a.rank - b.rank);
+  const count = (a) => live.filter((x) => x.cls === a).length;
+  const head = [count("running") && `${count("running")} running`, count("needs") && `${count("needs")} need${count("needs") === 1 ? "s" : ""} you`].filter(Boolean).join(" · ") || "idle";
+  document.getElementById(id).replaceChildren(
+    el("div", { class: "wb-head" }, el("b", {}, name), ` · ${head}`), ...boxLines(live, "nothing in flight"),
+    el("div", { class: "wb-acc sb-sum" }, summary));
+}
+
+function renderStationBoxes() {
+  const nodes = stationNodes();
+  const done24 = allJobs().filter((j) => j.action === "done" && Date.now() - Date.parse(j.updated_at) < DAY).length;
+  const blocked = nodes.claude.filter((n) => n.action === "needs_anthony").length;
+  nodeBox("claude-box", "CLAUDE", nodes.claude, `TODAY: ${done24} done · ${blocked} waiting on you`);
+  const orders = snap.inbox.filter((e) => e.action !== "done");
+  nodeBox("mac-box", "GROK BOT · MAC", nodes.mac,
+    `WORK ORDERS: ${orders.length} open · ${orders.filter((e) => e.action === "needs_anthony").length} waiting on you`);
+  renderWinBox();
+}
+
 function renderWinBox() {
   const w = snap.windows_box || {};
   const box = document.getElementById("win-box");
   const when = w.updated_at ? new Date(w.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never";
-  const dots = (name, width = 18) => `${name} ${".".repeat(Math.max(2, width - name.length))}`;
+  const jobs = [...(w.jobs || [])].sort((a, b) => (b.state === "RUNNING") - (a.state === "RUNNING"))
+    .map((j) => ({ name: j.name, state: j.state, cls: j.state.toLowerCase().replace(/\s+/g, "-") }));
   const lines = w.offline
     ? [el("div", { class: "wb-line wb-offline" }, "offline", el("span", { class: "wb-why" }, ` · ${w.reason}`))]
-    : !w.jobs.length
-      ? [el("div", { class: "wb-line wb-none" }, "no jobs")]
-      : w.jobs.map((j) => el("div", { class: "wb-line" },
-        el("span", { class: "wb-name" }, dots(j.name)), " ",
-        el("span", { class: `wb-st wb-${j.state.toLowerCase().replace(/\s+/g, "-")}` }, j.state)));
+    : boxLines(jobs, "no jobs");
   const acc = w.accepting || {};
   const accepting = el("div", { class: `wb-acc ${acc.known ? (acc.yes ? "yes" : "no") : "unknown"}` },
     "ACCEPTING JOBS: ", acc.known ? (acc.yes ? "yes" : `no${acc.reason ? ` — ${acc.reason}` : ""}`) : "unknown (not in windows-status.json yet)");
-  const rules = (w.rules || []).length ? el("ul", { class: "wb-rules" }, w.rules.map((r) => el("li", {}, r))) : null;
+  // The rules fold away so the box stays short; one click opens them.
+  const wasOpen = !!box.querySelector("details[open]");
+  const rules = (w.rules || []).length
+    ? el("details", { class: "wb-rules-fold", open: wasOpen }, el("summary", {}, `rules (${w.rules.length})`),
+      el("ul", { class: "wb-rules" }, w.rules.map((r) => el("li", {}, r))))
+    : null;
   box.className = `win-box${w.offline ? " is-offline" : ""}`;
   box.replaceChildren(el("div", { class: "wb-head" }, el("b", {}, "WINDOWS"), ` · last update ${when}`), ...lines, accepting, rules || "");
   placeWinBox();
 }
 
-// Under Windows' Death Star (wide screens; brains.js places it as it lays out); below the canvas when they stack.
+// Each box sits under its Death Star (wide screens; brains.js places them as it lays out); below the canvas
+// when the stations stack.
 function placeWinBox() {
   if (brains) brains.layout();
 }
@@ -1233,7 +1285,7 @@ function renderAll() {
   renderFlow();
   renderLearning();
   renderAudit();
-  renderWinBox();
+  renderStationBoxes();
   renderAttention();
   renderRunning();
   renderJobs();
