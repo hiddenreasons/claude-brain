@@ -936,3 +936,6 @@ html.calm .tl-bar.st-running { animation: none; }
   .tl-lane { grid-template-columns: 64px minmax(0, 1fr); }
   .tl-ranges { margin-left: 0; }
 }
+
+.ds-vader { text-decoration: none; border-color: rgba(255, 106, 94, 0.6); color: #ffd9d6; }
+.ds-vader:hover, .ds-vader:focus-visible { background: rgba(255, 70, 60, 0.18); color: #fff; }

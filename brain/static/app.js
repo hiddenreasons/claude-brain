@@ -1134,6 +1134,19 @@ function windowsView(node) {
   };
 }
 
+// Anything waiting on Anthony links to VADER, where he acts on it. VADER can't open a given page from a link
+// yet (it reopens the last page), so the button says which tab to go to.
+const VADER_URL = "http://localhost:8765/";
+function vaderWhere(text) {
+  if (/\b(review|judge|watch|re-?render|final|teaser|short|video)\b/i.test(text)) return "Produce → Review";
+  if (/\b(danger_guard|protected|--review|approv)/i.test(text)) return "System · protected changes";
+  if (/\btopic/i.test(text)) return "Topics";
+  return "Home · Needs you";
+}
+function vaderLink(text) {
+  return el("a", { class: "ds-more ds-vader", href: VADER_URL, target: "vader", rel: "noopener" }, `Open VADER ↗ · ${vaderWhere(text)}`);
+}
+
 // VADER's node terminal: a small macOS-style window next to the node. Only NEEDS ANTHONY gets a fix request.
 function openNodePopup(node, refresh) {
   const stage = document.querySelector(".brains-stage");
@@ -1157,7 +1170,8 @@ function openNodePopup(node, refresh) {
     el("div", { class: "ds-stream" }, ...view.lines),
     el("div", { class: "ds-acts" },
       view.fix,
-      el("button", { type: "button", class: "ds-more", onclick: view.more[1] }, view.more[0]),
+      node.action === "needs_anthony" ? vaderLink(`${node.title || ""} ${view.lines.map((l) => l.textContent).join(" ")}`) : null,
+      view.more ? el("button", { type: "button", class: "ds-more", onclick: view.more[1] }, view.more[0]) : null,
     ),
     el("div", { class: "ds-foot" }, el("span", {}, "SRC · read-only"), el("span", {}, node.id.split(":")[0].toUpperCase())),
   );
