@@ -1068,10 +1068,14 @@ function startDemo() {
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   let i = 0;
   const shot = (key, direction, text, machine) => brains.fire({ id: `demo-${i++}`, direction, machine, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } });
+  let turn = 0;
   const volley = () => {
     const live = inProgress();
     if (!live.length) return; // nothing in progress: nothing fires
-    const { station, key } = pick(live);
+    // take turns across the stations that have work in progress, so every link gets sample bolts
+    const stations = [...new Set(live.map((n) => n.station))];
+    const here = stations[turn++ % stations.length];
+    const { station, key } = pick(live.filter((n) => n.station === here));
     // the volley starts from the station where the job is in progress, then the reply comes back
     const out = station === "mac" ? "to_claude" : "to_mac", back = out === "to_claude" ? "to_mac" : "to_claude";
     const machine = station === "windows" ? "windows" : "mac";
