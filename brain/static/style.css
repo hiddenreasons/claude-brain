@@ -958,3 +958,5 @@ html.calm .tl-bar.st-running { animation: none; }
 .badge.fam-warn::before { content: "?"; }
 .badge.fam-info { color: #ffd666; border-color: rgba(255, 196, 0, 0.5); background: rgba(255, 196, 0, 0.1); }
 .badge.fam-info::before { content: "ℹ"; }
+.mark-btn.armed { color: #04170c; background: #3fe58f; border-color: #3fe58f; }
+.marked.lapsed { background: rgba(255, 255, 255, 0.08); color: var(--muted); margin-right: 6px; }

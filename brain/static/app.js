@@ -259,27 +259,68 @@ async function sendMark(kind, id, action, btn) {
       headers: { "Content-Type": "application/json", "X-Brain-Action": "mark" },
       body: JSON.stringify({ kind, id, action }),
     });
-    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    if (!res.ok) {
+      let why = res.statusText;
+      try { why = (await res.json()).error || why; } catch (e) { /* not JSON: keep the status text */ }
+      throw new Error(why);
+    }
     await load("/api/snapshot");
     if (ui.openNode && brains) openNodePopup(brains.findNode(ui.openNode), true);
+    refreshDetailMark();
   } catch (err) {
     if (btn) { btn.disabled = false; btn.textContent = `Couldn't save: ${err.message}`; }
   }
 }
 
+// Only a job shown as blocked or stalled, or done without proof, can be marked: never a running or queued one.
+const markableJob = (item) => ["blocked", "stalled"].includes(item.lifecycle) || (item.lifecycle === "done" && item.verified === false);
+
 function markControl(kind, id, item) {
   if (!item || !id) return null;
-  const m = item.owner_mark;
-  if (m) {
+  const live = { "aria-live": "polite" };
+  if (item.owner_mark) {
     const undo = el("button", { type: "button", class: "mark-btn undo", onclick: (ev) => { ev.stopPropagation(); sendMark(kind, id, "undo", undo); } }, "Undo mark");
-    return el("span", { class: "mark-ctl" }, undo);
+    return el("span", { class: "mark-ctl", ...live }, undo);
   }
-  if (["done", "resolved"].includes(item.lifecycle) || item.action === "done") return null;
+  if (!markableJob(item)) return null;
+  // Two steps, so one stray click can't silence an alert: the first asks, the second records it.
+  let armed = null;
   const btn = el("button", {
-    type: "button", class: "mark-btn", title: "You know it finished: record it. The Brain then looks for proof (commit, tests, file, STATUS.md).",
-    onclick: (ev) => { ev.stopPropagation(); sendMark(kind, id, "done", btn); },
+    type: "button", class: "mark-btn",
+    title: "You know it finished: record it. The Brain then looks for proof it can check (STATUS.md, git, a commit in git, Windows' DONE report).",
+    onclick: (ev) => {
+      ev.stopPropagation();
+      if (!armed) {
+        btn.textContent = "Confirm: mark it done?";
+        btn.classList.add("armed");
+        armed = setTimeout(() => { armed = null; btn.textContent = "✔ Mark done"; btn.classList.remove("armed"); }, 5000);
+        return;
+      }
+      clearTimeout(armed);
+      sendMark(kind, id, "done", btn);
+    },
   }, "✔ Mark done");
-  return el("span", { class: "mark-ctl" }, btn);
+  const lapsed = item.owner_mark_lapsed
+    ? el("span", { class: "marked lapsed", title: `You marked it done ${relTime(item.owner_mark_lapsed.at)}; the job changed since, so it shows as it is now.` }, "EARLIER MARK LAPSED")
+    : null;
+  return el("span", { class: "mark-ctl", ...live }, lapsed, btn);
+}
+
+function detailMarkSlot(kind, id) {
+  const j = findJob(kind, id);
+  const c = markControl(kind, id, j);
+  const line = j && (j.owner_mark || j.owner_mark_lapsed) ? foundationLine(j) : null;
+  return c || line ? el("div", { class: "detail-mark" }, c, line) : null;
+}
+
+function refreshDetailMark() {
+  const dialog = document.getElementById("detail");
+  if (!dialog.open || !ui.detail) return;
+  const old = dialog.querySelector(".detail-mark");
+  const fresh = detailMarkSlot(ui.detail.kind, ui.detail.id);
+  if (old && fresh) old.replaceWith(fresh);
+  else if (old) old.remove();
+  else if (fresh) document.getElementById("detail-body").prepend(fresh);
 }
 
 function remoteJob(key) {
@@ -1573,7 +1614,8 @@ async function openDetail(kind, id, title) {
   const body = document.getElementById("detail-body");
   document.getElementById("detail-title").textContent = title || id;
   body.replaceChildren(empty("Loading…"));
-  const markSlot = () => { const j = findJob(kind, id); const c = markControl(kind, id, j); return c ? el("div", { class: "detail-mark" }, c, foundationLine(j) || "") : null; };
+  ui.detail = { kind, id };
+  const markSlot = () => detailMarkSlot(kind, id);
   if (!dialog.open) dialog.showModal();
   try {
     const res = await fetch(`/api/job?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`, { cache: "no-store" });

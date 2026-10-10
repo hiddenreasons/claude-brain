@@ -66,6 +66,7 @@ class BrainState:
         self.snapshot_bytes = b"{}"
         self._fingerprint: Optional[str] = None
         self._known_ids: Dict[str, set] = {"oneshot": set(), "folder": set()}
+        self._markable: Dict[str, Dict[str, Any]] = {}
         self._first_seen: Dict[str, Optional[str]] = {}
         self.stopping = threading.Event()
         self._refresh_lock = threading.Lock()
@@ -117,6 +118,16 @@ class BrainState:
                 "folder": {j["id"] for j in snapshot["folders"]},
                 "remote": {j["id"] for j in snapshot["remote_jobs"]},
             }
+            self._markable = {
+                f"{kind}:{j['id']}": marks.snapshot_of(kind, j)
+                for kind, jobs in (
+                    ("folder", snapshot["folders"]),
+                    ("oneshot", snapshot["oneshots"]),
+                    ("remote", snapshot["remote_jobs"]),
+                )
+                for j in jobs
+                if marks.markable(j) and "owner_mark" not in j
+            }
             self.version += 1
             self.cond.notify_all()
         if self.exporter is not None:
@@ -140,6 +151,11 @@ class BrainState:
         except OSError:
             return set()
         return {m.group("id") for m in (MSG_RE.match(n) for n in names) if m}
+
+    def mark_target(self, kind: str, job_id: str) -> Optional[Dict[str, Any]]:
+        """How a markable job looks right now (state + last report time), or None if it can't be marked."""
+        with self.cond:
+            return self._markable.get(f"{kind}:{job_id}")
 
     def knows(self, kind: str, job_id: str) -> bool:
         with self.cond:
@@ -166,6 +182,7 @@ def make_handler(state: BrainState):
     class Handler(BaseHTTPRequestHandler):
         server_version = "ClaudeBrain"
         protocol_version = "HTTP/1.1"
+        timeout = 30  # a request that stalls mid-body can't hold a thread forever
 
         def log_message(self, fmt: str, *args: Any) -> None:
             log.debug("%s %s", self.address_string(), fmt % args)
@@ -176,6 +193,8 @@ def make_handler(state: BrainState):
             self.send_header("Content-Length", str(len(body)))
             for key, value in {"Cache-Control": "no-store", **SECURITY_HEADERS, **(extra or {})}.items():
                 self.send_header(key, value)
+            if self.close_connection:
+                self.send_header("Connection", "close")  # tell the client too, so it doesn't reuse the socket
             self.end_headers()
             self.wfile.write(body)
 
@@ -253,6 +272,7 @@ def make_handler(state: BrainState):
                 pass  # the page closed or reloaded
 
         def _not_allowed(self) -> None:
+            self.close_connection = True  # any body is left unread: never parse it as a next request
             self._error(HTTPStatus.METHOD_NOT_ALLOWED, "read-only: GET only")
 
         do_PUT = do_PATCH = do_DELETE = _not_allowed  # noqa: N815
@@ -260,6 +280,9 @@ def make_handler(state: BrainState):
         def do_POST(self) -> None:  # noqa: N802 (http.server naming)
             # The one write: Anthony's "Mark done", recorded in the Brain's own folder. Only this page can send
             # it: loopback Host and Origin, a JSON body and a custom header (a cross-site form can't do both).
+            # The connection closes after every POST, so a body left unread (refused, too big) can never be
+            # read as the next request on a keep-alive connection.
+            self.close_connection = True
             if urlsplit(self.path).path != "/api/mark":
                 self._not_allowed()
                 return
@@ -283,20 +306,29 @@ def make_handler(state: BrainState):
                 self._error(HTTPStatus.BAD_REQUEST, "send {kind, id, action}")
                 return
             kind, job_id, action = body.get("kind"), body.get("id"), body.get("action")
-            if (
-                kind not in marks.KINDS
-                or action not in marks.ACTIONS
-                or not isinstance(job_id, str)
-                or not is_safe_id(job_id)
-                or not state.knows(kind, job_id)
-            ):
+            if kind not in marks.KINDS or action not in marks.ACTIONS or not isinstance(job_id, str):
                 self._error(HTTPStatus.NOT_FOUND, "unknown job")
                 return
-            record = state.files.append(
-                marks.MARKS_FILE, {"kind": kind, "id": job_id, "action": action, "who": "Anthony"}
-            )
-            audit(state.files, "owner-mark", job_id, "marked done" if action == "done" else "mark undone", "Anthony")
-            state.refresh(force=True)
+            if action == "done":
+                # Only a job the page shows as blocked, stalled or unverified, and remember how it looked now.
+                target = state.mark_target(kind, job_id) if is_safe_id(job_id) else None
+                if target is None:
+                    self._error(HTTPStatus.CONFLICT, "only a blocked, stalled or unverified job can be marked done")
+                    return
+                entry = {"kind": kind, "id": job_id, "action": "done", "who": "Anthony", **target}
+            else:
+                # An undo works even after the job has left the page, so a mark can always be taken back.
+                if f"{kind}:{job_id}" not in marks.read_marks(state.cfg.brain_dir):
+                    self._error(HTTPStatus.NOT_FOUND, "no mark to undo")
+                    return
+                entry = {"kind": kind, "id": job_id, "action": "undo", "who": "Anthony"}
+            record = state.files.append(marks.MARKS_FILE, entry)
+            try:
+                change = "marked done" if action == "done" else "mark undone"
+                audit(state.files, "owner-mark", job_id, change, "Anthony")
+                state.refresh(force=True)
+            except Exception:  # the mark is saved; the page picks it up on the next refresh
+                log.exception("mark saved, but the audit line or refresh failed")
             self._json(HTTPStatus.OK, {"ok": True, "mark": record})
 
     return Handler
