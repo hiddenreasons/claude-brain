@@ -30,6 +30,16 @@ test("each label's tab is the ?page= on the link", () => {
   }
 });
 
+test("protected-change words win over review words; approving a video stays on Review", () => {
+  const cases = [
+    ["danger_guard holds 3 files: run --review to look at them", "System · protected changes"],
+    ["Short 71 final: protected change waiting for the owner's --review", "System · protected changes"],
+    ["approve the Short 71 video on Review", "Produce → Review"],
+    ["approve the docs change", "System · protected changes"],
+  ];
+  for (const [text, label] of cases) assert.equal(vaderWhere(text), label, text);
+});
+
 test("a tab with no VADER page name gets plain VADER", () => {
   const other = {};
   vm.runInNewContext(app.slice(start, end) + '\nvaderWhere = () => "Channel · stats";\nthis.href = vaderHref("x");', other);

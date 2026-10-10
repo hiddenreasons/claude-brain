@@ -1257,8 +1257,11 @@ function vaderHref(text) {
   return page ? `${VADER_URL}?page=${page}` : VADER_URL;
 }
 function vaderWhere(text) {
+  // Protected-change words first: "danger_guard … --review" is System, not the Review page. A bare "approve" stays after
+  // the review words, so "approve the Short 71 video" still goes to Review, where videos are approved.
+  if (/(danger_guard|\bprotected\b|--review\b)/i.test(text)) return "System · protected changes";
   if (/\b(review|judge|watch|re-?render|final|teaser|short|video)\b/i.test(text)) return "Produce → Review";
-  if (/\b(danger_guard|protected|--review|approv)/i.test(text)) return "System · protected changes";
+  if (/\bapprov/i.test(text)) return "System · protected changes";
   if (/\btopic/i.test(text)) return "Topics";
   return "Home · Needs you";
 }
