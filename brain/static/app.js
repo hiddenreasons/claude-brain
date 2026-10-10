@@ -42,7 +42,10 @@ function foundationLine(item) {
     bits.push(el("span", { class: "since", title: `${item.lifecycle} since ${item.state_since}` }, `${item.lifecycle} ${elapsed(item.state_since)}`));
   }
   for (const flag of item.flags || []) bits.push(el("span", { class: "flag-red", title: flag }, flag.split(":")[0]));
-  if (item.known_issue) bits.push(el("span", { class: "known", title: item.known_issue }, `KNOWN ISSUE ${item.known_issue.split(":")[0]}`));
+  if (item.known_issue) {
+    bits.push(el("span", { class: "known", title: `Approved lesson ${item.known_issue.id}: handled by MAC, not alerted` }, `KNOWN ISSUE ${item.known_issue.id}`),
+      el("span", { class: "life-why" }, `Fix: ${item.known_issue.fix}`));
+  }
   if (item.no_decision_id) bits.push(el("span", { class: "unverified", title: "Briefs written since the decision log started must cite the A-xxx IDs they follow" }, "NO A-ID"));
   return bits.length ? el("div", { class: "fnd" }, bits) : null;
 }
