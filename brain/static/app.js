@@ -1071,7 +1071,9 @@ function stationNodes() {
   }
   for (const [key, ms] of byKey) {
     const last = ms[0];
-    const own = last.blocked && !last.cleared ? "needs_anthony" : running.has(key) ? "in_progress" : "done";
+    // A job Anthony marked done (and whose mark still holds) no longer needs him on any station.
+    const markedDone = !!(remoteJob(key) || {}).owner_mark;
+    const own = last.blocked && !last.cleared && !markedDone ? "needs_anthony" : running.has(key) && !markedDone ? "in_progress" : "done";
     const action = claudeAction.has(key) && own !== "needs_anthony" ? claudeAction.get(key) : own;
     if (action === "done" && Date.now() - Date.parse(last.at) > DAY) continue;
     const onWindows = ms.some((m) => m.machine === "windows");
@@ -1143,7 +1145,7 @@ function windowsNodes(byKey) {
     if (Date.now() - Date.parse(last.at) > DAY) continue;
     add(key, {
       title: plain(last.text), kindLabel: "Windows job", sub: relTime(last.at), ref: { type: "comms", key },
-      action: last.blocked && !last.cleared ? "needs_anthony" : "done",
+      action: last.blocked && !last.cleared && !(remoteJob(key) || {}).owner_mark ? "needs_anthony" : "done",
     });
   }
   return out;
