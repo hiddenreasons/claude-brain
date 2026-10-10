@@ -204,8 +204,13 @@ def apply(snapshot: Dict[str, Any], comms: List[Dict[str, Any]]) -> Dict[str, An
         for i in items
         for w in i.get("drift", [])
     ]
+    return {"drift": drift, **counts(snapshot)}
+
+
+def counts(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Unverified DONEs and how many items wait on Anthony (recounted after his marks)."""
+    items = snapshot["folders"] + snapshot["oneshots"] + snapshot["inbox"] + snapshot.get("remote_jobs", [])
     return {
-        "drift": drift,
         "unverified": [j["id"] for j in snapshot["folders"] + snapshot["oneshots"] if j.get("verified") is False],
         "mine": sum(1 for i in items if i.get("up_next") == "Anthony")
         + sum(1 for d in (snapshot.get("status") or {}).get("decision_items", []) if d.get("up_next") == "Anthony"),

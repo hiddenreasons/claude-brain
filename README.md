@@ -2,7 +2,7 @@
 
 A live, read-only page that shows the work going on between MAC (Grok Bot) and Claude on VADER and Hidden Reasons.
 
-It refreshes by itself within a couple of seconds of any change. It never writes, deletes, posts or runs anything in VADER, Hidden Reasons or MAC's runs folder. The only place it writes is its own Obsidian vault.
+It refreshes by itself within a couple of seconds of any change. It never writes, deletes, posts or runs anything in VADER, Hidden Reasons or MAC's job folders. It writes only its own records in `~/.vader-mac-runs/brain/` (audit trail, alerts, recommendations, lessons, digests, Anthony's "Mark done" clicks) and its Obsidian vault; MAC's files in that folder (`comms.jsonl`, `codex-status.jsonl`, `windows-status.json`) are read, never written.
 
 ## Start it
 
@@ -93,9 +93,9 @@ Environment variables, all optional:
 
 ## Safety
 
-- Reads VADER, Hidden Reasons and MAC's runs folder; writes only into the Obsidian vault.
+- Reads VADER, Hidden Reasons and MAC's runs folder; writes only into its own `~/.vader-mac-runs/brain/` folder (never MAC's files there) and the Obsidian vault.
 - Listens on this Mac only (127.0.0.1), and answers only requests addressed to localhost.
-- GET only. There is no endpoint that changes anything.
+- GET only, except one: `POST /api/mark` records Anthony's "Mark done" (or its undo) in the Brain's own `owner-marks.jsonl`. It answers only the page itself (loopback Host and Origin, a JSON body, an `X-Brain-Action: mark` header) and never changes the job.
 - All text from files is shown as text, never as HTML, and the page loads nothing from the internet.
 - A test proves a full read of every source leaves every file's content and timestamp unchanged.
 

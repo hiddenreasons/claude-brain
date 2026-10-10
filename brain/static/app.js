@@ -42,6 +42,12 @@ function foundationLine(item) {
     bits.push(el("span", { class: "since", title: `${item.lifecycle} since ${item.state_since}` }, `${item.lifecycle} ${elapsed(item.state_since)}`));
   }
   for (const flag of item.flags || []) bits.push(el("span", { class: "flag-red", title: flag }, flag.split(":")[0]));
+  if (item.owner_mark) {
+    const m = item.owner_mark;
+    bits.push(m.verified
+      ? el("span", { class: "marked ok", title: `You marked it done ${relTime(m.at)}; proof: ${m.proof.kind} ${m.proof.text}` }, `✔ MARKED DONE · VERIFIED (${m.proof.kind})`)
+      : el("span", { class: "marked unv", title: `You marked it done ${relTime(m.at)}; no commit, test result, file or STATUS.md line yet. MAC confirms.` }, "MARKED DONE · UNVERIFIED"));
+  }
   if (item.known_issue) {
     bits.push(el("span", { class: "known", title: `Approved lesson ${item.known_issue.id}: handled by MAC, not alerted` }, `KNOWN ISSUE ${item.known_issue.id}`),
       el("span", { class: "life-why" }, `Fix: ${item.known_issue.fix}`));
@@ -242,6 +248,94 @@ function withAsk(card, askBtn) {
   return askBtn ? el("div", { class: "card-wrap" }, card, askBtn) : card;
 }
 
+// ---------- Anthony's "Mark done" ----------
+// For a job he knows finished but the Brain doesn't show as completed. The Brain records the mark in its own
+// folder (never touches the job), then verifies it: proof found = VERIFIED; none = UNVERIFIED and MAC confirms.
+// What the page is showing for a job, in the server's terms (marks.snapshot_of): a mark covers only that.
+function shownAs(kind, item) {
+  const seen = kind === "folder" ? item.report_at || item.stream_updated_at || item.updated_at
+    : kind === "oneshot" ? item.updated_at : item.last_at;
+  return { state: item.state, seen: seen || null };
+}
+
+async function sendMark(kind, id, action, btn, shown) {
+  if (btn) { btn.disabled = true; btn.textContent = action === "done" ? "Marking…" : "Undoing…"; }
+  try {
+    const res = await fetch("/api/mark", {
+      method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-Brain-Action": "mark" },
+      body: JSON.stringify({ kind, id, action, ...(shown || {}) }),
+    });
+    if (!res.ok) {
+      let why = res.statusText;
+      try { why = (await res.json()).error || why; } catch (e) { /* not JSON: keep the status text */ }
+      throw new Error(why);
+    }
+    await load("/api/snapshot");
+    if (ui.openNode && brains) openNodePopup(brains.findNode(ui.openNode), true);
+    refreshDetailMark();
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = `Couldn't save: ${err.message}`; }
+  }
+}
+
+// Only a job shown as blocked or stalled, or done without proof, can be marked: never a running or queued one.
+// (Same rule as marks.markable on the server, including a remote job that ended with a BLOCKED report.)
+const markableJob = (item) => ["blocked", "stalled"].includes(item.lifecycle) || (item.lifecycle === "done" && item.verified === false)
+  || (item.lifecycle !== "running" && `${item.source || ""} ${item.last_text || ""}`.includes("TO MAC: BLOCKED"));
+
+function markControl(kind, id, item) {
+  if (!item || !id) return null;
+  const live = { "aria-live": "polite" };
+  if (item.owner_mark) {
+    const undo = el("button", { type: "button", class: "mark-btn undo", onclick: (ev) => { ev.stopPropagation(); sendMark(kind, id, "undo", undo); } }, "Undo mark");
+    return el("span", { class: "mark-ctl", ...live }, undo);
+  }
+  if (!markableJob(item)) return null;
+  // Two steps, so one stray click can't silence an alert: the first asks, the second records it.
+  let armed = null;
+  const btn = el("button", {
+    type: "button", class: "mark-btn",
+    title: "You know it finished: record it. The Brain then looks for proof it can check (STATUS.md, git, a commit in git, Windows' DONE report).",
+    onclick: (ev) => {
+      ev.stopPropagation();
+      if (!armed) {
+        btn.textContent = "Confirm: mark it done?";
+        btn.classList.add("armed");
+        armed = setTimeout(() => { armed = null; btn.textContent = "✔ Mark done"; btn.classList.remove("armed"); }, 5000);
+        return;
+      }
+      clearTimeout(armed);
+      sendMark(kind, id, "done", btn, shownAs(kind, item));
+    },
+  }, "✔ Mark done");
+  const lapsed = item.owner_mark_lapsed
+    ? el("span", { class: "marked lapsed", title: `You marked it done ${relTime(item.owner_mark_lapsed.at)}; the job changed since, so it shows as it is now.` }, "EARLIER MARK LAPSED")
+    : null;
+  return el("span", { class: "mark-ctl", ...live }, lapsed, btn);
+}
+
+function detailMarkSlot(kind, id) {
+  const j = findJob(kind, id);
+  const c = markControl(kind, id, j);
+  const line = j && (j.owner_mark || j.owner_mark_lapsed) ? foundationLine(j) : null;
+  return c || line ? el("div", { class: "detail-mark" }, c, line) : null;
+}
+
+function refreshDetailMark() {
+  const dialog = document.getElementById("detail");
+  if (!dialog.open || !ui.detail) return;
+  const old = dialog.querySelector(".detail-mark");
+  const fresh = detailMarkSlot(ui.detail.kind, ui.detail.id);
+  if (old && fresh) old.replaceWith(fresh);
+  else if (old) old.remove();
+  else if (fresh) document.getElementById("detail-body").prepend(fresh);
+}
+
+function remoteJob(key) {
+  return (snap.remote_jobs || []).find((r) => r.id === key) || null;
+}
+
 function jobCard(job) {
   const card = el("button", {
     type: "button", class: `card tone-${family(job.state)}${isFresh(jobKey(job)) ? " fresh" : ""}`, "data-key": jobKey(job),
@@ -256,7 +350,8 @@ function jobCard(job) {
   const askBtn = job.alertable
     ? ask(() => window.askDrafts.draftForJob(findJob(job.kind, job.id) || job))
     : null;
-  return el("li", {}, withAsk(card, askBtn));
+  const side = [askBtn, markControl(job.kind, job.id, job)].filter(Boolean);
+  return el("li", {}, side.length ? el("div", { class: "card-wrap" }, card, ...side) : card);
 }
 
 function activityList(actions, limit) {
@@ -551,6 +646,14 @@ function renderTimeline() {
 
 // ---------- attention, decisions, orders, logs ----------
 
+// What each "For MAC" item is: a failure, something to confirm, or a known issue with its fix.
+function macBadge(a) {
+  const [word, fam] = {
+    "owner-mark": ["CONFIRM", "warn"], "known-issue": ["KNOWN ISSUE", "info"], restart: ["RESTARTS", "bad"], loop: ["LOOP?", "warn"],
+  }[a.source] || ["FAILED", "bad"];
+  return el("span", { class: `badge fam-${fam}` }, word);
+}
+
 function renderAttention() {
   const items = snap.attention.filter((a) => matches(a.title, a.detail)
     && mineOnly(a.source === "job" ? findJob(a.kind, a.id) : findOrder(a.id)));
@@ -564,7 +667,7 @@ function renderAttention() {
   const macList = forMac.length ? el("div", { class: "for-mac" },
     el("p", { class: "for-mac-h" }, `For MAC, not you (${forMac.length})`),
     el("ul", { class: "bullets" }, forMac.map((a) => el("li", {},
-      el("span", { class: "badge fam-bad" }, "FAILED"), " ", el("b", {}, a.title), ` · ${a.detail}`,
+      macBadge(a), " ", el("b", {}, a.title), ` · ${a.detail}`,
       a.at ? ` · ${relTime(a.at)}` : "", el("span", { class: "via" }, " → MAC")))),
   ) : null;
   if (!items.length) {
@@ -977,7 +1080,9 @@ function stationNodes() {
   }
   for (const [key, ms] of byKey) {
     const last = ms[0];
-    const own = last.blocked && !last.cleared ? "needs_anthony" : running.has(key) ? "in_progress" : "done";
+    // A job Anthony marked done (and whose mark still holds) no longer needs him on any station.
+    const markedDone = !!(remoteJob(key) || {}).owner_mark;
+    const own = last.blocked && !last.cleared && !markedDone ? "needs_anthony" : running.has(key) && !markedDone ? "in_progress" : "done";
     const action = claudeAction.has(key) && own !== "needs_anthony" ? claudeAction.get(key) : own;
     if (action === "done" && Date.now() - Date.parse(last.at) > DAY) continue;
     const onWindows = ms.some((m) => m.machine === "windows");
@@ -1049,7 +1154,7 @@ function windowsNodes(byKey) {
     if (Date.now() - Date.parse(last.at) > DAY) continue;
     add(key, {
       title: plain(last.text), kindLabel: "Windows job", sub: relTime(last.at), ref: { type: "comms", key },
-      action: last.blocked && !last.cleared ? "needs_anthony" : "done",
+      action: last.blocked && !last.cleared && !(remoteJob(key) || {}).owner_mark ? "needs_anthony" : "done",
     });
   }
   return out;
@@ -1134,6 +1239,28 @@ function windowsView(node) {
   };
 }
 
+// "Mark done" in a node's popup: Claude jobs here, and jobs MAC logged on other machines.
+function popupMark(node) {
+  const r = node.ref || {};
+  if (r.type === "job") return markControl(r.kind, r.id, findJob(r.kind, r.id));
+  const key = r.type === "comms" ? r.key : null;
+  const remote = key && remoteJob(key);
+  return remote ? markControl("remote", key, remote) : null;
+}
+
+// Anything waiting on Anthony links to VADER, where he acts on it. VADER can't open a given page from a link
+// yet (it reopens the last page), so the button says which tab to go to.
+const VADER_URL = "http://localhost:8765/";
+function vaderWhere(text) {
+  if (/\b(review|judge|watch|re-?render|final|teaser|short|video)\b/i.test(text)) return "Produce → Review";
+  if (/\b(danger_guard|protected|--review|approv)/i.test(text)) return "System · protected changes";
+  if (/\btopic/i.test(text)) return "Topics";
+  return "Home · Needs you";
+}
+function vaderLink(text) {
+  return el("a", { class: "ds-more ds-vader", href: VADER_URL, target: "vader", rel: "noopener" }, `Open VADER ↗ · ${vaderWhere(text)}`);
+}
+
 // VADER's node terminal: a small macOS-style window next to the node. Only NEEDS ANTHONY gets a fix request.
 function openNodePopup(node, refresh) {
   const stage = document.querySelector(".brains-stage");
@@ -1157,7 +1284,9 @@ function openNodePopup(node, refresh) {
     el("div", { class: "ds-stream" }, ...view.lines),
     el("div", { class: "ds-acts" },
       view.fix,
-      el("button", { type: "button", class: "ds-more", onclick: view.more[1] }, view.more[0]),
+      popupMark(node),
+      node.action === "needs_anthony" ? vaderLink(`${node.title || ""} ${view.lines.map((l) => l.textContent).join(" ")}`) : null,
+      view.more ? el("button", { type: "button", class: "ds-more", onclick: view.more[1] }, view.more[0]) : null,
     ),
     el("div", { class: "ds-foot" }, el("span", {}, "SRC · read-only"), el("span", {}, node.id.split(":")[0].toUpperCase())),
   );
@@ -1496,6 +1625,8 @@ async function openDetail(kind, id, title) {
   const body = document.getElementById("detail-body");
   document.getElementById("detail-title").textContent = title || id;
   body.replaceChildren(empty("Loading…"));
+  ui.detail = { kind, id };
+  const markSlot = () => detailMarkSlot(kind, id);
   if (!dialog.open) dialog.showModal();
   try {
     const res = await fetch(`/api/job?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`, { cache: "no-store" });
@@ -1503,6 +1634,7 @@ async function openDetail(kind, id, title) {
     const d = await res.json();
     if (kind === "oneshot") {
       body.replaceChildren(
+        ...[markSlot()].filter(Boolean),
         ...readableSection("MAC's order to Claude", d.prompt),
         ...readableSection("Claude's result", d.result || "(no result yet)"),
         ...section("Errors", d.errors && d.errors.trim()),
@@ -1512,6 +1644,7 @@ async function openDetail(kind, id, title) {
         ? [el("h3", {}, `Live activity (last ${d.activity.length})`), activityList(d.activity, 200)]
         : [];
       body.replaceChildren(
+        ...[markSlot()].filter(Boolean),
         ...readableSection("Report", d.report),
         ...readableSection("Final reply", d.last_result && d.last_result.text),
         ...log,

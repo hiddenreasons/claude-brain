@@ -936,3 +936,27 @@ html.calm .tl-bar.st-running { animation: none; }
   .tl-lane { grid-template-columns: 64px minmax(0, 1fr); }
   .tl-ranges { margin-left: 0; }
 }
+
+.ds-vader { text-decoration: none; border-color: rgba(255, 106, 94, 0.6); color: #ffd9d6; }
+.ds-vader:hover, .ds-vader:focus-visible { background: rgba(255, 70, 60, 0.18); color: #fff; }
+
+/* ---------- Anthony's "Mark done" ---------- */
+.mark-ctl { display: inline-flex; align-items: center; }
+.mark-btn {
+  padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap; font: 600 11.5px var(--ui);
+  color: #d9ffe9; border: 1px solid rgba(63, 229, 143, 0.55); background: rgba(63, 229, 143, 0.1);
+}
+.mark-btn:hover, .mark-btn:focus-visible { background: rgba(63, 229, 143, 0.22); color: #fff; outline: none; }
+.mark-btn.undo { color: var(--muted); border-color: var(--line-2); background: transparent; }
+.mark-btn.undo:hover, .mark-btn.undo:focus-visible { color: #fff; }
+.mark-btn:disabled { opacity: 0.7; cursor: progress; }
+.marked { font: 700 9.5px var(--mono); letter-spacing: 0.08em; padding: 1px 6px; border-radius: 3px; }
+.marked.ok { background: rgba(63, 229, 143, 0.16); color: #7dffb8; }
+.marked.unv { background: rgba(255, 181, 71, 0.16); color: #ffcf7a; }
+.detail-mark { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 14px; }
+.badge.fam-warn { color: #ffcf7a; border-color: rgba(255, 181, 71, 0.55); background: rgba(255, 181, 71, 0.12); }
+.badge.fam-warn::before { content: "?"; }
+.badge.fam-info { color: #ffd666; border-color: rgba(255, 196, 0, 0.5); background: rgba(255, 196, 0, 0.1); }
+.badge.fam-info::before { content: "ℹ"; }
+.mark-btn.armed { color: #04170c; background: #3fe58f; border-color: #3fe58f; }
+.marked.lapsed { background: rgba(255, 255, 255, 0.08); color: var(--muted); margin-right: 6px; }
