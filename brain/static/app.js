@@ -594,7 +594,8 @@ function handleMessages(s) {
   // Oldest first; volley.js keeps at most three bolts in flight and queues the rest.
   fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m) => {
     if (!brains) return;
-    if (m.direction === "codex") brains.spark("mac", `codex:${m.ref.job}`); // Codex reports to MAC: a spark, not a bolt
+    // Codex reports to MAC: a spark on the station of the machine it runs on, not a bolt
+    if (m.direction === "codex") brains.spark(m.machine === "windows" ? "windows" : "mac", `codex:${m.ref.job}`);
     else brains.fire(m);
   });
 }
@@ -781,7 +782,7 @@ function renderHero() {
     toMac: hour.filter((m) => m.direction === "to_mac").length,
   });
   // Real activity makes the stations spark: each new tool call or reply in a running job (with its name),
-  // or, when there's no new action, its log moving at all. A fresh Windows heartbeat tick sparks MAC's.
+  // or, when there's no new action, its log moving at all. A fresh Windows heartbeat tick sparks Windows'.
   for (const j of running) {
     const actions = j.activity || [];
     const lastKey = actions.length ? JSON.stringify(actions[actions.length - 1]) : "";
@@ -805,7 +806,7 @@ function renderHero() {
     }
   }
   const beat = snap.windows || {};
-  if (pulsesPrimed && beat.fresh && beat.job && beat.at && beat.at !== lastBeat) brains.spark("mac", beat.job);
+  if (pulsesPrimed && beat.fresh && beat.job && beat.at && beat.at !== lastBeat) brains.spark("windows", beat.job);
   lastBeat = beat.at;
   pulsesPrimed = true;
 }
@@ -885,14 +886,53 @@ function stationNodes() {
       kindLabel: "Waiting on Anthony", sub: clipText(text, 40), ref: { type: "decision", text: d },
     });
   });
+  // Codex picture jobs sit on the station of the machine they run on.
+  const windows = [];
   for (const c of (snap.codex && snap.codex.running) || []) {
-    mac.push({
+    (c.machine === "WINDOWS" ? windows : mac).push({
       id: `codex:${c.job}`, key: `codex:${c.job}`, codex: true, label: `CODEX ${c.job.split("-")[0]}`, title: c.job,
       action: "in_progress", kindLabel: `Codex picture job · ${c.machine}`, sub: `started ${relTime(c.started_at)}`,
       ref: { type: "codex", job: c.job },
     });
   }
-  return { claude, mac };
+  windows.push(...windowsNodes(byKey));
+  return { claude, mac, windows };
+}
+
+// Windows' Death Star: its jobs (running and queued from windows-status.json, finished in the last day) and
+// every job MAC talks to on Windows. A job MAC sent keeps its twin on MAC's station, so the bolt has both ends.
+function windowsNodes(byKey) {
+  const out = [], seen = new Set();
+  const add = (key, node) => { if (!key || seen.has(key)) return; seen.add(key); out.push({ id: `win:${key}`, key, label: key, ...node }); };
+  for (const r of snap.remote_jobs || []) {
+    if (r.machine !== "WINDOWS") continue;
+    const ended = r.lifecycle === "done" || r.lifecycle === "resolved";
+    const when = r.last_at || r.started_at;
+    if (ended && !(when && Date.now() - Date.parse(when) < DAY)) continue;
+    add(r.id, {
+      title: plain(r.last_text && !r.last_text.startsWith("{") ? r.last_text : r.id), kindLabel: "Windows job",
+      action: ended ? "done" : r.lifecycle === "blocked" ? "needs_anthony" : r.lifecycle === "running" ? "in_progress" : "queued",
+      sub: ended ? `finished · ${plain(r.lifecycle_why || "")}` : `${r.lifecycle} · ${relTime(r.state_since || when)}`,
+      ref: { type: "comms", key: r.id },
+    });
+  }
+  for (const j of (snap.windows_box && snap.windows_box.jobs) || []) {
+    if (j.name.startsWith("codex ")) continue; // shown as its Codex node
+    add(j.name, {
+      title: j.name, kindLabel: "Windows job", action: j.state === "RUNNING" ? "in_progress" : "queued",
+      sub: j.state.toLowerCase(), ref: { type: "comms", key: j.name },
+    });
+  }
+  for (const [key, ms] of byKey) {
+    if (!ms.some((m) => m.machine === "windows") || ms[0].direction === "codex") continue;
+    const last = ms[0];
+    if (Date.now() - Date.parse(last.at) > DAY) continue;
+    add(key, {
+      title: plain(last.text), kindLabel: "Windows job", sub: relTime(last.at), ref: { type: "comms", key },
+      action: last.blocked && !last.cleared ? "needs_anthony" : "done",
+    });
+  }
+  return out;
 }
 
 function closeNodePopup() {
@@ -1027,16 +1067,21 @@ function startDemo() {
   };
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   let i = 0;
-  const shot = (key, direction, text) => brains.fire({ id: `demo-${i++}`, direction, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } });
+  const shot = (key, direction, text, machine) => brains.fire({ id: `demo-${i++}`, direction, machine, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } });
+  let turn = 0;
   const volley = () => {
     const live = inProgress();
     if (!live.length) return; // nothing in progress: nothing fires
-    const { station, key } = pick(live);
+    // take turns across the stations that have work in progress, so every link gets sample bolts
+    const stations = [...new Set(live.map((n) => n.station))];
+    const here = stations[turn++ % stations.length];
+    const { station, key } = pick(live.filter((n) => n.station === here));
     // the volley starts from the station where the job is in progress, then the reply comes back
     const out = station === "mac" ? "to_claude" : "to_mac", back = out === "to_claude" ? "to_mac" : "to_claude";
-    shot(key, out, `Sample (not real): message on ${key}`);
-    setTimeout(() => shot(key, back, `Sample (not real): reply on ${key}`), 650);
-    setTimeout(() => shot(key, out, `Sample (not real): answer on ${key}`), 1300);
+    const machine = station === "windows" ? "windows" : "mac";
+    shot(key, out, `Sample (not real): message on ${key}`, machine);
+    setTimeout(() => shot(key, back, `Sample (not real): reply on ${key}`, machine), 650);
+    setTimeout(() => shot(key, out, `Sample (not real): answer on ${key}`, machine), 1300);
   };
   setTimeout(volley, 1500);
   setInterval(volley, 3200);
@@ -1074,33 +1119,82 @@ function renderAudit() {
 }
 
 // The WINDOWS box between the Death Stars: a short terminal list from windows-status.json.
+// A short terminal list under each Death Star: what is running, needs Anthony or waits, at most BOX_LINES
+// lines and a "+N more" line, then one summary line.
+const BOX_LINES = 5;
+const boxDots = (name, width = 18) => {
+  const n = name.length > width ? `${name.slice(0, width - 1)}…` : name;
+  return `${n} ${".".repeat(Math.max(2, width - n.length))}`;
+};
+const boxLine = (name, state, cls) => el("div", { class: "wb-line" },
+  el("span", { class: "wb-name" }, boxDots(name)), " ", el("span", { class: `wb-st wb-${cls}` }, state));
+function boxLines(items, empty) {
+  if (!items.length) return [el("div", { class: "wb-line wb-none" }, empty)];
+  const out = items.slice(0, BOX_LINES).map((i) => boxLine(i.name, i.state, i.cls));
+  const rest = items.slice(BOX_LINES);
+  if (rest.length) {
+    const words = [...new Set(rest.map((i) => i.state.toLowerCase()))].join(" or ");
+    out.push(el("div", { class: "wb-line wb-more" }, `+${rest.length} more ${words}`));
+  }
+  return out;
+}
+const STATE_WORD = { needs_anthony: ["NEEDS YOU", "needs"], in_progress: ["RUNNING", "running"], queued: ["QUEUED", "queued"] };
+const STATE_RANK = { needs_anthony: 0, in_progress: 1, queued: 2 };
+
+function nodeBox(id, name, nodes, summary) {
+  const live = [];
+  const seen = new Set();
+  for (const n of nodes) {
+    if (!STATE_WORD[n.action] || seen.has(n.label)) continue;
+    seen.add(n.label);
+    live.push({ name: n.label, state: STATE_WORD[n.action][0], cls: STATE_WORD[n.action][1], rank: STATE_RANK[n.action] });
+  }
+  live.sort((a, b) => a.rank - b.rank);
+  const count = (a) => live.filter((x) => x.cls === a).length;
+  const head = [count("running") && `${count("running")} running`, count("needs") && `${count("needs")} need${count("needs") === 1 ? "s" : ""} you`].filter(Boolean).join(" · ") || "idle";
+  document.getElementById(id).replaceChildren(
+    el("div", { class: "wb-head" }, el("b", {}, name), ` · ${head}`), ...boxLines(live, "nothing in flight"),
+    el("div", { class: "wb-acc sb-sum" }, summary));
+}
+
+function renderStationBoxes() {
+  const nodes = stationNodes();
+  const done24 = allJobs().filter((j) => j.action === "done" && Date.now() - Date.parse(j.updated_at) < DAY).length;
+  const blocked = nodes.claude.filter((n) => n.action === "needs_anthony").length;
+  nodeBox("claude-box", "CLAUDE", nodes.claude, `TODAY: ${done24} done · ${blocked} waiting on you`);
+  const orders = snap.inbox.filter((e) => e.action !== "done");
+  nodeBox("mac-box", "GROK BOT · MAC", nodes.mac,
+    `WORK ORDERS: ${orders.length} open · ${orders.filter((e) => e.action === "needs_anthony").length} waiting on you`);
+  renderWinBox();
+}
+
 function renderWinBox() {
   const w = snap.windows_box || {};
   const box = document.getElementById("win-box");
   const when = w.updated_at ? new Date(w.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never";
-  const dots = (name, width = 18) => `${name} ${".".repeat(Math.max(2, width - name.length))}`;
+  const jobs = [...(w.jobs || [])].sort((a, b) => (b.state === "RUNNING") - (a.state === "RUNNING"))
+    .map((j) => ({ name: j.name, state: j.state, cls: j.state.toLowerCase().replace(/\s+/g, "-") }));
   const lines = w.offline
     ? [el("div", { class: "wb-line wb-offline" }, "offline", el("span", { class: "wb-why" }, ` · ${w.reason}`))]
-    : !w.jobs.length
-      ? [el("div", { class: "wb-line wb-none" }, "no jobs")]
-      : w.jobs.map((j) => el("div", { class: "wb-line" },
-        el("span", { class: "wb-name" }, dots(j.name)), " ",
-        el("span", { class: `wb-st wb-${j.state.toLowerCase().replace(/\s+/g, "-")}` }, j.state)));
+    : boxLines(jobs, "no jobs");
   const acc = w.accepting || {};
   const accepting = el("div", { class: `wb-acc ${acc.known ? (acc.yes ? "yes" : "no") : "unknown"}` },
     "ACCEPTING JOBS: ", acc.known ? (acc.yes ? "yes" : `no${acc.reason ? ` — ${acc.reason}` : ""}`) : "unknown (not in windows-status.json yet)");
-  const rules = (w.rules || []).length ? el("ul", { class: "wb-rules" }, w.rules.map((r) => el("li", {}, r))) : null;
+  // The rules fold away so the box stays short; one click opens them.
+  const wasOpen = !!box.querySelector("details[open]");
+  const rules = (w.rules || []).length
+    ? el("details", { class: "wb-rules-fold", open: wasOpen }, el("summary", {}, `rules (${w.rules.length})`),
+      el("ul", { class: "wb-rules" }, w.rules.map((r) => el("li", {}, r))))
+    : null;
   box.className = `win-box${w.offline ? " is-offline" : ""}`;
   box.replaceChildren(el("div", { class: "wb-head" }, el("b", {}, "WINDOWS"), ` · last update ${when}`), ...lines, accepting, rules || "");
   placeWinBox();
 }
 
-// Between the stations, just under the link (wide screens); below the canvas when they stack.
+// Each box sits under its Death Star (wide screens; brains.js places them as it lays out); below the canvas
+// when the stations stack.
 function placeWinBox() {
-  const box = document.getElementById("win-box");
-  if (!brains || brains.w < 640) { box.style.removeProperty("top"); return; }
-  const st = brains.stations.mac;
-  box.style.setProperty("top", `${Math.round(st.cy + 22)}px`);
+  if (brains) brains.layout();
 }
 
 // Anything waiting on Anthony for 30+ minutes, at the top of the page.
@@ -1191,7 +1285,7 @@ function renderAll() {
   renderFlow();
   renderLearning();
   renderAudit();
-  renderWinBox();
+  renderStationBoxes();
   renderAttention();
   renderRunning();
   renderJobs();

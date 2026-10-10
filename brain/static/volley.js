@@ -2,13 +2,14 @@
 
 // Volley: which job a message is about, that job's colour, and which way its bolt flies.
 // No page code here, so Node can test it (tests/js/volley.test.js). brains.js draws what this decides.
-// Layout: MAC on the left, Claude on the right, so MAC → Claude flies left to right.
+// Layout: Claude on the left, MAC in the middle, Windows on the right. A message from a job on the Windows
+// machine (machine: "windows") flies between MAC and Windows; every other one between MAC and Claude.
 
 (function (root) {
-  // Clearly different colours, kept away from the stations' blue (#6fd7ff) and orange (#ff9628)
+  // Clearly different colours, kept away from the stations' blue (#6fd7ff), orange (#ff9628) and purple (#a78bfa)
   // and from the alert red, so a job reads as itself on either station. No pinks: at node size they
   // read as the red NEEDS ANTHONY ring.
-  const PALETTE = ["#fff07a", "#b18cff", "#b6f04a", "#3fe58f", "#5b6cff", "#e8e8ff"];
+  const PALETTE = ["#fff07a", "#00e0a0", "#b6f04a", "#3fe58f", "#2f80ff", "#e8e8ff"];
   const BOLT_MS = 800; // one shot: 0.6 to 1 s
   const LAND_MS = 450; // glow on the receiving node
   const FLASH_MS = 1600; // reduced motion: both nodes glow, nothing moves (long enough to notice)
@@ -45,10 +46,13 @@
     return null;
   }
 
-  // Which station sends and which receives.
+  // Which station sends and which receives, and which way the bolt flies on screen.
   function shot(message) {
     const toClaude = message.direction === "to_claude";
-    return { from: toClaude ? "mac" : "claude", to: toClaude ? "claude" : "mac", dir: toClaude ? "ltr" : "rtl" };
+    const far = message.machine === "windows" ? "windows" : "claude";
+    const from = toClaude ? "mac" : far, to = toClaude ? far : "mac";
+    const x = { claude: 0, mac: 1, windows: 2 };
+    return { from, to, dir: x[to] > x[from] ? "ltr" : "rtl" };
   }
 
   class Volley {

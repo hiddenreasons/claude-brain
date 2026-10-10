@@ -134,7 +134,7 @@ strong { color: #fff; font-weight: 600; }
 }
 .brains-stage::before { left: 6px; top: 6px; border-left-width: 1.2px; border-top-width: 1.2px; }
 .brains-stage::after { right: 6px; bottom: 6px; border-right-width: 1.2px; border-bottom-width: 1.2px; }
-#brains-canvas { display: block; width: 100%; height: clamp(380px, 38vw, 560px); }
+#brains-canvas { display: block; width: 100%; height: clamp(420px, 40vw, 600px); }
 .hero-readout {
   position: absolute; top: 16px; max-width: 30%; padding: 8px 11px; pointer-events: none;
   font: 500 11px/1.65 var(--mono); border-radius: 8px;
@@ -144,6 +144,7 @@ strong { color: #fff; font-weight: 600; }
 }
 .hero-left { left: 16px; }
 .hero-right { right: 16px; text-align: left; }
+.hero-center { left: 50%; transform: translateX(-50%); }
 #readout-claude { --c: var(--claude); }
 #readout-mac { --c: var(--mac); }
 .ro-line { display: flex; gap: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -163,6 +164,7 @@ strong { color: #fff; font-weight: 600; }
 .bolt-tip span { display: block; overflow-wrap: anywhere; color: var(--muted); }
 .bolt-tip.to_claude { border-color: color-mix(in srgb, var(--mac) 60%, transparent); }
 .bolt-tip.to_mac { border-color: color-mix(in srgb, var(--claude) 60%, transparent); }
+.bolt-tip.windows { border-color: rgba(167, 139, 250, 0.6); }
 .bolt-tip.blocked { border-color: var(--accent); }
 /* Sample mode (?demo): impossible to mistake for live data. Amber, VADER's warning colour, not alert red. */
 body.demo-mode .hero { box-shadow: inset 0 0 0 2px #ffb547, 0 0 40px -12px rgba(255, 181, 71, 0.7), 0 22px 56px rgba(0, 0, 0, 0.38); }
@@ -648,7 +650,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .rec-opt, .rec-res { grid-column: 3; color: var(--muted); font-size: 12px; }
 .rec-declined { opacity: 0.6; }
 
-/* ---------- the WINDOWS box between the Death Stars ---------- */
+/* ---------- a short terminal box under each Death Star (purple for Windows) ---------- */
 .win-box {
   position: absolute; left: 50%; top: 55%; transform: translateX(-50%); z-index: 2; min-width: 230px; max-width: 300px;
   padding: 8px 12px 9px; border-radius: 8px; font: 11.5px/1.6 var(--mono); color: #dfe6ff;
@@ -669,7 +671,23 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .wb-acc { margin-top: 5px; padding-top: 5px; border-top: 1px dashed rgba(167, 139, 250, 0.35); font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; white-space: normal; }
 .wb-acc.yes { color: var(--done); } .wb-acc.no { color: var(--bad-text); } .wb-acc.unknown { color: var(--dim); font-weight: 400; }
 .wb-rules { margin: 4px 0 0; padding-left: 14px; font-size: 9.5px; line-height: 1.45; color: var(--muted); white-space: normal; }
-@media (max-width: 640px) { .win-box { position: static; transform: none; margin: 10px auto; } }
+.wb-rules-fold summary { margin-top: 3px; font-size: 10px; color: var(--dim); cursor: pointer; }
+.wb-rules-fold summary:hover, .wb-rules-fold summary:focus-visible { color: var(--windows); }
+.wb-more { color: var(--dim); font-size: 10.5px; }
+.wb-needs { color: var(--bad-text); }
+.sb-sum { color: var(--muted); font-weight: 600; }
+.win-box.sb-claude { border-color: rgba(255, 150, 40, 0.45); box-shadow: 0 0 24px -10px rgba(255, 150, 40, 0.7); background: rgba(20, 12, 6, 0.82); }
+.win-box.sb-claude .wb-head b, .sb-claude .wb-queued { color: var(--claude); }
+.win-box.sb-claude .wb-acc { border-top-color: rgba(255, 150, 40, 0.35); }
+.win-box.sb-claude .wb-name { color: #ffeede; }
+.win-box.sb-mac { border-color: rgba(110, 215, 255, 0.45); box-shadow: 0 0 24px -10px rgba(110, 215, 255, 0.7); background: rgba(6, 14, 20, 0.82); }
+.win-box.sb-mac .wb-head b, .sb-mac .wb-queued { color: var(--mac); }
+.win-box.sb-mac .wb-acc { border-top-color: rgba(110, 215, 255, 0.35); }
+.win-box.sb-mac .wb-name { color: #e2f4ff; }
+@media (max-width: 640px) {
+  .win-box { position: static; transform: none; margin: 10px auto; }
+  .brains-stage .calm-note { position: static; transform: none; margin: 10px auto 14px; } /* after the boxes, not over them */
+}
 
 /* ---------- readable reports in the job window ---------- */
 .rd {
@@ -775,7 +793,7 @@ html.calm *, html.calm *::before, html.calm *::after { animation: none !importan
   .statusbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .consoles { grid-template-columns: minmax(0, 1fr); }
   .hero-readout { display: none; }
-  #brains-canvas { height: 700px; }
+  #brains-canvas { height: 1000px; }
   .hud-row { flex-wrap: wrap; justify-content: center; }
   .hud-sub { display: none; }
   .term-line { grid-template-columns: 50px minmax(0, 1fr) auto; }
