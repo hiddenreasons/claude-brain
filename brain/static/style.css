@@ -663,7 +663,21 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(3px); 
 .wb-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-name { color: #e6e3ff; }
 .wb-st { font-weight: 700; letter-spacing: 0.06em; color: rgba(var(--wire-rgb), 0.85); }
-.wb-running, .wb-busy, .wb-starting { color: #fff; text-shadow: 0 0 8px rgba(255, 255, 255, 0.6); }
+/* RUNNING reads first: a bright green pill with a live dot, on a lit row */
+.wb-running, .wb-busy, .wb-starting {
+  display: inline-block; padding: 0 7px 0 6px; border-radius: 4px; line-height: 1.45;
+  color: #04170c; background: #3fe58f; box-shadow: 0 0 12px rgba(63, 229, 143, 0.65); text-shadow: none;
+}
+.wb-running::before, .wb-busy::before, .wb-starting::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 5px 1px 0; border-radius: 50%;
+  background: #04170c; vertical-align: middle; animation: run-dot 1.2s ease-in-out infinite;
+}
+@keyframes run-dot { 50% { opacity: 0.2; } }
+html.calm .wb-running::before, html.calm .wb-busy::before, html.calm .wb-starting::before { animation: none; }
+.wb-line:has(.wb-running, .wb-busy, .wb-starting) {
+  margin: 1px -6px; padding: 1px 6px; border-radius: 4px; background: rgba(63, 229, 143, 0.1);
+}
+.wb-line:has(.wb-running, .wb-busy, .wb-starting) .wb-name { color: #fff; font-weight: 700; }
 .wb-ready, .wb-queued, .wb-waiting, .wb-pending { color: var(--windows); }
 .wb-none { color: var(--dim); }
 .wb-offline { color: var(--bad-text); font-weight: 700; letter-spacing: 0.1em; }
