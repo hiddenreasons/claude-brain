@@ -1,8 +1,9 @@
 "use strict";
 
-// The main view: two Death Stars on one canvas, built like VADER's Issues-tab hologram
+// The main view: three Death Stars on one canvas, built like VADER's Issues-tab hologram
 // (vader/web/v5/issues-brain.js, theme B), adapted here rather than imported.
-// Left: Claude, in the Brain's orange. Right: Grok Bot / MAC, in the Brain's blue.
+// Left: Claude, in the Brain's orange. Middle: Grok Bot / MAC, in the Brain's blue, the hub both machines
+// report to. Right: the Windows machine, in the WINDOWS box's purple, with that box under it.
 // Each station: lat/long grid, a double equatorial trench, a dish, a dotted halo, scanlines.
 // Nodes are live items (setNodes); their marker shows the action label and their colour is the job's own
 // colour (volley.js), the same on both stations. Each message fires one bolt from the sending job's node to
@@ -49,7 +50,14 @@
       name: "GROK BOT · MAC", wire: [110, 215, 255], node: [226, 246, 255], core: [150, 225, 255],
       label: "rgba(226,244,255,.96)", sub: "rgba(150,205,235,.9)", dir: 1, dish: [34, -50, 17],
     },
+    windows: {
+      name: "WINDOWS", wire: [167, 139, 250], node: [236, 230, 255], core: [190, 170, 255],
+      label: "rgba(238,232,255,.96)", sub: "rgba(196,180,250,.9)", dir: 1, dish: [34, -50, 17],
+    },
   };
+  // The comms links: Claude and Windows each talk to MAC.
+  const PAIRS = [["claude", "mac"], ["mac", "windows"]];
+  const SWEEP_PHASE = { claude: 0, mac: 0.5, windows: 0.25 };
 
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
   const hexRgb = (h) => (h ? [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) : null);
@@ -115,7 +123,7 @@
       this.q = this.q0.slice();
       this.mx = qMat(this.q);
       this.nodes = [];
-      this.halo = haloDots(key === "claude" ? 7 : 13);
+      this.halo = haloDots({ claude: 7, mac: 13, windows: 21 }[key] || 5);
       this.cx = 0; this.cy = 0; this.R = 1;
       this.hold = false; // spin pauses while one of its nodes is open
       this.spinW = 1;
@@ -152,7 +160,7 @@
       this.onHover = onHover || (() => {});
       this.onNodeClick = null;
       this.calm = reduceMotion;
-      this.stations = { claude: new Station("claude"), mac: new Station("mac") };
+      this.stations = { claude: new Station("claude"), mac: new Station("mac"), windows: new Station("windows") };
       this.volley = new V.Volley({ calm: reduceMotion });
       this.sparks = new SY.Sparks({ calm: reduceMotion });
       this.keyOf = (m) => V.jobKey(m); // the page swaps in one that knows work-order numbers
@@ -174,7 +182,7 @@
       // always start below them, however long their text gets.
       const watcher = new ResizeObserver(() => this.resize());
       watcher.observe(canvas);
-      for (const box of canvas.parentElement.querySelectorAll(".hero-readout")) watcher.observe(box);
+      for (const box of canvas.parentElement.querySelectorAll(".hero-readout, .win-box")) watcher.observe(box);
       new MutationObserver(() => {
         for (const box of canvas.parentElement.querySelectorAll(".demo-banner")) watcher.observe(box);
         this.resize();
@@ -192,7 +200,7 @@
     // ---------- page API (same calls the old brains took, plus nodes) ----------
 
     setNodes(groups) {
-      for (const key of ["claude", "mac"]) {
+      for (const key of Object.keys(this.stations)) {
         const st = this.stations[key];
         // A job sits at the same place on both stations, so twins are easy to spot.
         st.nodes = (groups[key] || []).map((n) => ({ ...n, ll: placeNode(n.key || n.id, st.th.dish), rgb: hexRgb(V.jobColor(n.key)) }));
@@ -238,7 +246,7 @@
 
     select(nodeId) {
       this.selected = nodeId;
-      for (const st of Object.values(this.stations)) st.hold = !!nodeId; // both pause, so they stay in step
+      for (const st of Object.values(this.stations)) st.hold = !!nodeId; // all pause, so they stay in step
     }
 
     // Screen position of a node right now (for placing its popup).
@@ -268,22 +276,31 @@
     }
 
     layout() {
-      // MAC on the left, Claude on the right: MAC → Claude flies left to right.
-      const { w, h } = this, a = this.stations.mac, b = this.stations.claude;
+      // Claude on the left, MAC in the middle, Windows on the right: both machines report to MAC.
+      const { w, h } = this, { claude: a, mac: b, windows: c } = this.stations;
+      const box = this.canvas.parentElement.querySelector(".win-box");
       if (w < 640) {
-        // Phone width: MAC on top, Claude below.
-        const R = Math.min(w * 0.26, h * 0.14);
-        a.cx = w / 2; a.cy = h * 0.26; b.cx = w / 2; b.cy = h * 0.7;
-        a.R = R; b.R = R;
+        // Phone width: stacked, Claude on top; the WINDOWS box drops below the canvas (CSS).
+        const R = Math.min(w * 0.24, h * 0.095);
+        for (const [st, y] of [[a, 0.17], [b, 0.5], [c, 0.83]]) { st.cx = w / 2; st.cy = h * y; st.R = R; }
+        if (box) { box.style.removeProperty("top"); box.style.removeProperty("left"); }
+        this.canvas.parentElement.style.removeProperty("padding-bottom");
         return;
       }
       // Keep clear of the readout boxes: the spin-axis label sits about 1.3 R above the centre, and the name
-      // plates about 1.45 R + 48 px below it.
+      // plates about 1.45 R + 48 px below it. The WINDOWS box goes under Windows' name plate; where it runs
+      // past the canvas, the stage grows to hold it.
       const top = this.overlayBottom() + 14;
-      const R = Math.max(40, Math.min(w * 0.12, (h - top - 56) / 2.75));
+      const R = Math.max(40, Math.min(w * 0.1, (h - top - 56) / 2.75));
       const cy = top + R * 1.3;
-      a.cx = w * 0.27; a.cy = cy; a.R = R;
-      b.cx = w * 0.73; b.cy = cy; b.R = R;
+      for (const [st, x] of [[a, 0.18], [b, 0.5], [c, 0.82]]) { st.cx = w * x; st.cy = cy; st.R = R; }
+      if (box) {
+        const half = (box.offsetWidth || 260) / 2, boxTop = Math.round(cy + R * 1.42 + 52);
+        box.style.setProperty("left", `${Math.round(Math.min(w - half - 10, c.cx))}px`);
+        box.style.setProperty("top", `${boxTop}px`);
+        const spill = Math.max(0, boxTop + box.offsetHeight + 16 - h);
+        this.canvas.parentElement.style.setProperty("padding-bottom", `${spill}px`);
+      }
     }
 
     // The lowest edge of anything drawn over the top of the canvas (readouts, sample banner), in canvas px.
@@ -314,7 +331,7 @@
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       ctx.clearRect(0, 0, this.w, this.h);
       const flick = this.calm ? 0.95 : 0.9 + 0.06 * Math.sin(t / 97) + 0.04 * Math.sin(t / 31.7 + 1.3);
-      this.drawLink(t);
+      this.drawLink();
       for (const st of Object.values(this.stations)) { this.drawStation(st, t, flick); this.drawSparks(st); }
       const focus = this.focusKey();
       for (const st of Object.values(this.stations)) this.drawNodes(st, t, focus);
@@ -331,7 +348,8 @@
       const dg = ctx.createRadialGradient(cx - R * 0.2, cy - R * 0.25, R * 0.1, cx, cy, RL);
       dg.addColorStop(0, rgba(W0, 0.07)); dg.addColorStop(1, rgba(W0, 0.015));
       ctx.fillStyle = dg; ctx.beginPath(); ctx.arc(cx, cy, RL, 0, 7); ctx.fill();
-      const hot = st.key === "claude" ? this.running > 0 : this.traffic.toClaude > 0;
+      const hot = st.key === "claude" ? this.running > 0
+        : st.key === "mac" ? this.traffic.toClaude > 0 : st.nodes.some((n) => n.action === "in_progress");
       const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.55);
       cg.addColorStop(0, rgba(st.th.core, hot ? 0.16 : 0.08)); cg.addColorStop(1, rgba(st.th.core, 0));
       ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(cx, cy, R * 0.55, 0, 7); ctx.fill();
@@ -407,7 +425,7 @@
       ctx.fillStyle = rgba(W0, 0.03);
       for (let yy = Math.floor(cy - RL); yy < cy + RL; yy += 3) ctx.fillRect(cx - RL, yy, RL * 2, 1);
       if (!this.calm) {
-        const sweep = cy - RL + (((t / 9000) + (st.key === "mac" ? 0.5 : 0)) % 1) * RL * 2;
+        const sweep = cy - RL + (((t / 9000) + (SWEEP_PHASE[st.key] || 0)) % 1) * RL * 2;
         const sg = ctx.createLinearGradient(0, sweep - 30, 0, sweep + 30);
         sg.addColorStop(0, rgba(W0, 0)); sg.addColorStop(0.5, rgba(W0, 0.06)); sg.addColorStop(1, rgba(W0, 0));
         ctx.fillStyle = sg; ctx.fillRect(cx - RL, sweep - 30, RL * 2, 60);
@@ -417,8 +435,8 @@
       // name plate under the station
       const counts = { needs: 0, live: 0 };
       for (const n of st.nodes) { if (n.action === "needs_anthony") counts.needs++; if (n.action === "in_progress") counts.live++; }
-      // Stacked on a phone, the top station's plate (MAC's) goes above it so the link below stays clear.
-      const above = this.w < 640 && st.key === "mac";
+      // Stacked on a phone, the top station's plate (Claude's) goes above it so the link below stays clear.
+      const above = this.w < 640 && st.key === "claude";
       const ny = above ? Math.max(18, cy - R * 1.42 - 24) : Math.min(cy + R * 1.42 + 16, this.h - 26);
       ctx.textAlign = "center";
       ctx.font = `600 11px ${MONO}`; ctx.letterSpacing = "2.4px";
@@ -580,8 +598,8 @@
 
     // ---------- the link, the bolts and the twins ----------
 
-    linkPoints() {
-      const a = this.stations.claude, b = this.stations.mac;
+    linkPoints(pair) {
+      const a = this.stations[pair[0]], b = this.stations[pair[1]];
       const dx = b.cx - a.cx, dy = b.cy - a.cy, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
       const p0 = [a.cx + ux * a.R * LIMB * 1.24, a.cy + uy * a.R * LIMB * 1.24];
       const p1 = [b.cx - ux * b.R * LIMB * 1.24, b.cy - uy * b.R * LIMB * 1.24];
@@ -590,29 +608,34 @@
       return { p0, c, p1 };
     }
 
-    linkAt(u) {
-      const { p0, c, p1 } = this.linkPoints(), v = 1 - u;
+    linkAt(pair, u) {
+      const { p0, c, p1 } = this.linkPoints(pair), v = 1 - u;
       return [v * v * p0[0] + 2 * v * u * c[0] + u * u * p1[0], v * v * p0[1] + 2 * v * u * c[1] + u * u * p1[1]];
     }
 
-    drawLink(t) {
-      const ctx = this.ctx, { p0, c, p1 } = this.linkPoints();
-      if (Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) < 30) return;
-      const litMsg = this.lit ? this.messages.get(this.lit) : null;
-      const path = () => { ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.quadraticCurveTo(c[0], c[1], p1[0], p1[1]); };
-      path(); ctx.strokeStyle = rgba(LINK, litMsg ? 0.1 : 0.03); ctx.lineWidth = 4; ctx.stroke();
-      path(); ctx.strokeStyle = rgba(LINK, litMsg ? 0.5 : 0.14); ctx.lineWidth = 1; ctx.setLineDash([2, 5]); ctx.stroke(); ctx.setLineDash([]);
-      for (const p of [p0, p1]) { ctx.beginPath(); ctx.arc(p[0], p[1], 2, 0, 7); ctx.fillStyle = rgba(LINK, 0.7); ctx.fill(); }
-      ctx.font = `600 8.5px ${MONO}`; ctx.letterSpacing = "1.6px"; ctx.textAlign = "center"; ctx.fillStyle = rgba(LINK, 0.5);
-      const mid = this.linkAt(0.5); ctx.fillText("COMMS", mid[0] + (this.w < 640 ? 34 : 0), mid[1] - (this.w < 640 ? -3 : 10)); ctx.letterSpacing = "0px";
-      if (litMsg) {
-        const toClaude = litMsg.direction === "to_claude";
-        // the link runs from Claude (0) to MAC (1): point toward the receiver
-        const p = this.linkAt(0.5), q = this.linkAt(toClaude ? 0.53 : 0.47);
-        const ang = Math.atan2(p[1] - q[1], p[0] - q[0]);
-        ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(ang);
-        ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(-4, -4); ctx.lineTo(-4, 4); ctx.closePath();
-        ctx.fillStyle = rgba(LINK, 0.95); ctx.fill(); ctx.restore();
+    drawLink() {
+      const ctx = this.ctx, litMsg = this.lit ? this.messages.get(this.lit) : null;
+      const litShot = litMsg ? V.shot(litMsg) : null;
+      for (const pair of PAIRS) {
+        const { p0, c, p1 } = this.linkPoints(pair);
+        if (Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) < 30) continue;
+        const lit = !!litShot && pair.includes(litShot.from) && pair.includes(litShot.to);
+        const path = () => { ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.quadraticCurveTo(c[0], c[1], p1[0], p1[1]); };
+        path(); ctx.strokeStyle = rgba(LINK, lit ? 0.1 : 0.03); ctx.lineWidth = 4; ctx.stroke();
+        path(); ctx.strokeStyle = rgba(LINK, lit ? 0.5 : 0.14); ctx.lineWidth = 1; ctx.setLineDash([2, 5]); ctx.stroke(); ctx.setLineDash([]);
+        for (const p of [p0, p1]) { ctx.beginPath(); ctx.arc(p[0], p[1], 2, 0, 7); ctx.fillStyle = rgba(LINK, 0.7); ctx.fill(); }
+        ctx.font = `600 8.5px ${MONO}`; ctx.letterSpacing = "1.6px"; ctx.textAlign = "center"; ctx.fillStyle = rgba(LINK, 0.5);
+        // stacked on a phone, the lower link's label sits below MAC's name plate
+        const mid = this.linkAt(pair, this.w < 640 && pair[0] === "mac" ? 0.62 : 0.5);
+        ctx.fillText("COMMS", mid[0] + (this.w < 640 ? 34 : 0), mid[1] - (this.w < 640 ? -3 : 10)); ctx.letterSpacing = "0px";
+        if (lit) {
+          // the link runs from pair[0] (0) to pair[1] (1): point toward the receiver
+          const p = this.linkAt(pair, 0.5), q = this.linkAt(pair, litShot.to === pair[1] ? 0.47 : 0.53);
+          const ang = Math.atan2(p[1] - q[1], p[0] - q[0]);
+          ctx.save(); ctx.translate(p[0], p[1]); ctx.rotate(ang);
+          ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(-4, -4); ctx.lineTo(-4, 4); ctx.closePath();
+          ctx.fillStyle = rgba(LINK, 0.95); ctx.fill(); ctx.restore();
+        }
       }
     }
 
@@ -626,9 +649,9 @@
     }
 
     // Where a job's node sits on a station right now; front-most if it is there twice. Without a node,
-    // the station's limb facing the other station.
-    anchor(stationKey, key) {
-      const st = this.stations[stationKey], other = this.stations[stationKey === "mac" ? "claude" : "mac"];
+    // the station's limb facing the station at the other end (MAC, or for MAC the one named).
+    anchor(stationKey, key, towardKey) {
+      const st = this.stations[stationKey], other = this.stations[towardKey || (stationKey === "mac" ? "claude" : "mac")];
       let best = null;
       for (const n of st.nodes) {
         if (!key || n.key !== key) continue;
@@ -641,7 +664,7 @@
     }
 
     boltPath(b) {
-      const p0 = this.anchor(b.from, b.key), p1 = this.anchor(b.to, b.key);
+      const p0 = this.anchor(b.from, b.key, b.to), p1 = this.anchor(b.to, b.key, b.from);
       const dx = p1[0] - p0[0], dy = p1[1] - p0[1], d = Math.hypot(dx, dy) || 1;
       // MAC → Claude arcs over, Claude → MAC arcs under, so a volley reads as two lanes.
       const bow = Math.min(90, d * 0.16) * (b.dir === "ltr" ? 1 : -1);
@@ -677,14 +700,17 @@
       }
     }
 
-    // Hovering a job: a faint dashed line to its twin on the other station.
+    // Hovering a job: a faint dashed line to its twin on each linked station.
     drawTwinLink(focus) {
       if (!focus) return;
-      const a = this.stations.mac.nodes.some((n) => n.key === focus), b = this.stations.claude.nodes.some((n) => n.key === focus);
-      if (!a || !b) return;
-      const p0 = this.anchor("mac", focus), p1 = this.anchor("claude", focus), col = hexRgb(V.jobColor(focus)) || LINK, ctx = this.ctx;
-      ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]);
-      ctx.strokeStyle = rgba(col, 0.45); ctx.lineWidth = 1; ctx.setLineDash([2, 6]); ctx.stroke(); ctx.setLineDash([]);
+      const has = (k) => this.stations[k].nodes.some((n) => n.key === focus);
+      const col = hexRgb(V.jobColor(focus)) || LINK, ctx = this.ctx;
+      for (const [x, y] of PAIRS) {
+        if (!has(x) || !has(y)) continue;
+        const p0 = this.anchor(x, focus, y), p1 = this.anchor(y, focus, x);
+        ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]);
+        ctx.strokeStyle = rgba(col, 0.45); ctx.lineWidth = 1; ctx.setLineDash([2, 6]); ctx.stroke(); ctx.setLineDash([]);
+      }
     }
 
     drawToolPings(t) {
@@ -754,7 +780,7 @@
         this.hover = node;
         this.onHover(msg ? msg.id : null);
         cv.style.cursor = node || msg ? "pointer" : this.stationAt(mx, my) ? "grab" : "default";
-        if (node) this.showTip(mx, my, `${node.node.key || node.node.label} · ${ACTION_TEXT[node.node.action] || ""} · ${node.node.kindLabel || ""}`, node.node.title || node.node.label, node.node.action === "needs_anthony" ? "blocked" : node.station.key === "claude" ? "to_mac" : "to_claude");
+        if (node) this.showTip(mx, my, `${node.node.key || node.node.label} · ${ACTION_TEXT[node.node.action] || ""} · ${node.node.kindLabel || ""}`, node.node.title || node.node.label, node.node.action === "needs_anthony" ? "blocked" : { claude: "to_mac", mac: "to_claude", windows: "windows" }[node.station.key]);
         else if (msg) this.showTip(mx, my, `${directionLabel(msg)} · ${KIND_LABELS[msg.kind] || msg.kind}`, msg.text, msg.blocked && !msg.cleared ? "blocked" : msg.direction);
         else this.tooltip.hidden = true;
       });
@@ -791,7 +817,8 @@
   const ACTION_TEXT = { needs_anthony: "NEEDS ANTHONY", in_progress: "IN PROGRESS", queued: "QUEUED", done: "DONE" };
 
   function directionLabel(message) {
-    return message.direction === "to_claude" ? "MAC → Claude" : "Claude → MAC";
+    const claude = message.machine === "windows" ? "Claude (Windows)" : "Claude";
+    return message.direction === "to_claude" ? `MAC → ${claude}` : `${claude} → MAC`;
   }
 
   window.BrainsVisual = BrainsVisual;

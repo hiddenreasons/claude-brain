@@ -3,7 +3,7 @@
 // Run with: node --test tests/js/volley.test.js   (pytest runs it too: tests/test_js.py)
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { PALETTE, jobColor, jobKey, Volley, BOLT_MS } = require("../../brain/static/volley.js");
+const { PALETTE, jobColor, jobKey, shot, Volley, BOLT_MS } = require("../../brain/static/volley.js");
 
 const toClaude = (id, job) => ({ id, direction: "to_claude", ref: { source: "comms", job, wo: null } });
 const toMac = (id, job) => ({ id, direction: "to_mac", ref: { source: "comms", job, wo: null } });
@@ -23,11 +23,11 @@ test("the same job gets the same colour on both Death Stars", () => {
   assert.equal(fromInbox, fromLog);
 });
 
-test("the palette stays clear of the blue and orange bases and of alert red", () => {
+test("the palette stays clear of the blue, orange and purple bases and of alert red", () => {
   const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
   for (const c of PALETTE) {
-    for (const base of ["#6fd7ff", "#ff9628", "#e10600"]) assert.ok(dist(rgb(c), rgb(base)) > 90, `${c} too close to ${base}`);
+    for (const base of ["#6fd7ff", "#ff9628", "#a78bfa", "#e10600"]) assert.ok(dist(rgb(c), rgb(base)) > 90, `${c} too close to ${base}`);
   }
   // and clear of each other
   PALETTE.forEach((a, i) => PALETTE.slice(i + 1).forEach((b) => assert.ok(dist(rgb(a), rgb(b)) > 60, `${a} too close to ${b}`)));
@@ -49,7 +49,7 @@ test("no job colour is a shade of the alert red (no pinks or magentas)", () => {
   }
 });
 
-test("one comms entry fires exactly one bolt, MAC to Claude flying left to right", () => {
+test("one comms entry fires exactly one bolt, MAC to Claude flying right to left", () => {
   const v = new Volley();
   const m = toClaude("m1", "issuestab");
   v.push(m, jobKey(m), 0);
@@ -57,17 +57,31 @@ test("one comms entry fires exactly one bolt, MAC to Claude flying left to right
   const active = v.step(10);
   assert.equal(active.length, 1);
   assert.equal(v.queue.length, 0);
-  assert.deepEqual([active[0].from, active[0].to, active[0].dir], ["mac", "claude", "ltr"]);
+  assert.deepEqual([active[0].from, active[0].to, active[0].dir], ["mac", "claude", "rtl"]);
   assert.equal(active[0].color, jobColor("issuestab"));
 });
 
-test("a reply flies back the other way, Claude to MAC right to left", () => {
+test("a reply flies back the other way, Claude to MAC left to right", () => {
   const v = new Volley({ gap: 0 });
   v.push(toClaude("m1", "issuestab"), "issuestab", 0);
   v.push(toMac("m2", "issuestab"), "issuestab", 0);
   const [first, second] = v.step(0);
-  assert.equal(first.dir, "ltr");
-  assert.deepEqual([second.from, second.to, second.dir], ["claude", "mac", "rtl"]);
+  assert.equal(first.dir, "rtl");
+  assert.deepEqual([second.from, second.to, second.dir], ["claude", "mac", "ltr"]);
+});
+
+test("a job on the Windows machine fires between MAC and Windows, never Claude's station", () => {
+  const onWindows = (m) => ({ ...m, machine: "windows" });
+  const v = new Volley({ gap: 0 });
+  v.push(onWindows(toClaude("w1", "tbatch01")), "tbatch01", 0);
+  v.push(onWindows(toMac("w2", "tbatch01")), "tbatch01", 0);
+  const [out, back] = v.step(0);
+  assert.deepEqual([out.from, out.to, out.dir], ["mac", "windows", "ltr"]);
+  assert.deepEqual([back.from, back.to, back.dir], ["windows", "mac", "rtl"]);
+  v.step(BOLT_MS + 1);
+  assert.ok(v.landings.every((l) => l.station !== "claude"));
+  // a message from MAC's own machine still goes to Claude
+  assert.equal(shot({ direction: "to_claude", machine: "mac" }).to, "claude");
 });
 
 test("no more than three bolts fly at once; the rest wait and then fire", () => {

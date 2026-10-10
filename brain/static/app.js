@@ -594,7 +594,8 @@ function handleMessages(s) {
   // Oldest first; volley.js keeps at most three bolts in flight and queues the rest.
   fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m) => {
     if (!brains) return;
-    if (m.direction === "codex") brains.spark("mac", `codex:${m.ref.job}`); // Codex reports to MAC: a spark, not a bolt
+    // Codex reports to MAC: a spark on the station of the machine it runs on, not a bolt
+    if (m.direction === "codex") brains.spark(m.machine === "windows" ? "windows" : "mac", `codex:${m.ref.job}`);
     else brains.fire(m);
   });
 }
@@ -781,7 +782,7 @@ function renderHero() {
     toMac: hour.filter((m) => m.direction === "to_mac").length,
   });
   // Real activity makes the stations spark: each new tool call or reply in a running job (with its name),
-  // or, when there's no new action, its log moving at all. A fresh Windows heartbeat tick sparks MAC's.
+  // or, when there's no new action, its log moving at all. A fresh Windows heartbeat tick sparks Windows'.
   for (const j of running) {
     const actions = j.activity || [];
     const lastKey = actions.length ? JSON.stringify(actions[actions.length - 1]) : "";
@@ -805,7 +806,7 @@ function renderHero() {
     }
   }
   const beat = snap.windows || {};
-  if (pulsesPrimed && beat.fresh && beat.job && beat.at && beat.at !== lastBeat) brains.spark("mac", beat.job);
+  if (pulsesPrimed && beat.fresh && beat.job && beat.at && beat.at !== lastBeat) brains.spark("windows", beat.job);
   lastBeat = beat.at;
   pulsesPrimed = true;
 }
@@ -885,14 +886,53 @@ function stationNodes() {
       kindLabel: "Waiting on Anthony", sub: clipText(text, 40), ref: { type: "decision", text: d },
     });
   });
+  // Codex picture jobs sit on the station of the machine they run on.
+  const windows = [];
   for (const c of (snap.codex && snap.codex.running) || []) {
-    mac.push({
+    (c.machine === "WINDOWS" ? windows : mac).push({
       id: `codex:${c.job}`, key: `codex:${c.job}`, codex: true, label: `CODEX ${c.job.split("-")[0]}`, title: c.job,
       action: "in_progress", kindLabel: `Codex picture job · ${c.machine}`, sub: `started ${relTime(c.started_at)}`,
       ref: { type: "codex", job: c.job },
     });
   }
-  return { claude, mac };
+  windows.push(...windowsNodes(byKey));
+  return { claude, mac, windows };
+}
+
+// Windows' Death Star: its jobs (running and queued from windows-status.json, finished in the last day) and
+// every job MAC talks to on Windows. A job MAC sent keeps its twin on MAC's station, so the bolt has both ends.
+function windowsNodes(byKey) {
+  const out = [], seen = new Set();
+  const add = (key, node) => { if (!key || seen.has(key)) return; seen.add(key); out.push({ id: `win:${key}`, key, label: key, ...node }); };
+  for (const r of snap.remote_jobs || []) {
+    if (r.machine !== "WINDOWS") continue;
+    const ended = r.lifecycle === "done" || r.lifecycle === "resolved";
+    const when = r.last_at || r.started_at;
+    if (ended && !(when && Date.now() - Date.parse(when) < DAY)) continue;
+    add(r.id, {
+      title: plain(r.last_text && !r.last_text.startsWith("{") ? r.last_text : r.id), kindLabel: "Windows job",
+      action: ended ? "done" : r.lifecycle === "blocked" ? "needs_anthony" : r.lifecycle === "running" ? "in_progress" : "queued",
+      sub: ended ? `finished · ${plain(r.lifecycle_why || "")}` : `${r.lifecycle} · ${relTime(r.state_since || when)}`,
+      ref: { type: "comms", key: r.id },
+    });
+  }
+  for (const j of (snap.windows_box && snap.windows_box.jobs) || []) {
+    if (j.name.startsWith("codex ")) continue; // shown as its Codex node
+    add(j.name, {
+      title: j.name, kindLabel: "Windows job", action: j.state === "RUNNING" ? "in_progress" : "queued",
+      sub: j.state.toLowerCase(), ref: { type: "comms", key: j.name },
+    });
+  }
+  for (const [key, ms] of byKey) {
+    if (!ms.some((m) => m.machine === "windows") || ms[0].direction === "codex") continue;
+    const last = ms[0];
+    if (Date.now() - Date.parse(last.at) > DAY) continue;
+    add(key, {
+      title: plain(last.text), kindLabel: "Windows job", sub: relTime(last.at), ref: { type: "comms", key },
+      action: last.blocked && !last.cleared ? "needs_anthony" : "done",
+    });
+  }
+  return out;
 }
 
 function closeNodePopup() {
@@ -1027,16 +1067,17 @@ function startDemo() {
   };
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   let i = 0;
-  const shot = (key, direction, text) => brains.fire({ id: `demo-${i++}`, direction, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } });
+  const shot = (key, direction, text, machine) => brains.fire({ id: `demo-${i++}`, direction, machine, kind: direction === "to_claude" ? "job_sent" : "report", text, ref: { source: "comms", job: key, wo: null } });
   const volley = () => {
     const live = inProgress();
     if (!live.length) return; // nothing in progress: nothing fires
     const { station, key } = pick(live);
     // the volley starts from the station where the job is in progress, then the reply comes back
     const out = station === "mac" ? "to_claude" : "to_mac", back = out === "to_claude" ? "to_mac" : "to_claude";
-    shot(key, out, `Sample (not real): message on ${key}`);
-    setTimeout(() => shot(key, back, `Sample (not real): reply on ${key}`), 650);
-    setTimeout(() => shot(key, out, `Sample (not real): answer on ${key}`), 1300);
+    const machine = station === "windows" ? "windows" : "mac";
+    shot(key, out, `Sample (not real): message on ${key}`, machine);
+    setTimeout(() => shot(key, back, `Sample (not real): reply on ${key}`, machine), 650);
+    setTimeout(() => shot(key, out, `Sample (not real): answer on ${key}`, machine), 1300);
   };
   setTimeout(volley, 1500);
   setInterval(volley, 3200);
@@ -1095,12 +1136,9 @@ function renderWinBox() {
   placeWinBox();
 }
 
-// Between the stations, just under the link (wide screens); below the canvas when they stack.
+// Under Windows' Death Star (wide screens; brains.js places it as it lays out); below the canvas when they stack.
 function placeWinBox() {
-  const box = document.getElementById("win-box");
-  if (!brains || brains.w < 640) { box.style.removeProperty("top"); return; }
-  const st = brains.stations.mac;
-  box.style.setProperty("top", `${Math.round(st.cy + 22)}px`);
+  if (brains) brains.layout();
 }
 
 // Anything waiting on Anthony for 30+ minutes, at the top of the page.
