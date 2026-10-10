@@ -137,6 +137,21 @@ function draftForCommsJob(job, messages) {
   return { to: "mac", subject: `Job ${job}: blocked`, body: lines.join("\n") };
 }
 
+// An "is it done?" item from STATUS.md: MAC checks it (VADER c3); it never goes to Anthony.
+function draftForConfirm(text) {
+  return {
+    to: "mac",
+    subject: "Please confirm it's done",
+    body: [
+      `MAC, STATUS.md lists this as waiting on Anthony, but it's a "confirm it's done" check (from Claude Brain, ${nowStamp()}):`,
+      "",
+      `"${quote(text, 500)}"`,
+      "",
+      "Please confirm it from the commit, test run or file, mark it settled in STATUS.md, and tell me the proof.",
+    ].join("\n"),
+  };
+}
+
 function draftForIncident(issue) {
   const lines = [
     `MAC, about an incident in ISSUES-LOG.md (from Claude Brain, ${nowStamp()}):`,
@@ -162,7 +177,10 @@ function draftForBrain(name, src) {
 
 // ---------- the dialog ----------
 
+let currentDraft = null;
+
 function openAsk(draft) {
+  currentDraft = draft;
   const dialog = document.getElementById("ask");
   const who = RECIPIENTS[draft.to];
   document.getElementById("ask-title").textContent = `Copy a message to ${who.name}`;
@@ -170,7 +188,9 @@ function openAsk(draft) {
   const box = document.getElementById("ask-text");
   box.value = draft.body;
   const status = document.getElementById("ask-status");
-  status.textContent = "";
+  const check = window.Rules.checkDraft(draft);
+  status.textContent = check.ok ? "" : `Not ready to send: ${check.problem}`;
+  status.classList.toggle("bad", !check.ok);
   if (!dialog.open) dialog.showModal();
   box.focus();
   box.setSelectionRange(0, 0);
@@ -179,6 +199,13 @@ function openAsk(draft) {
 async function copyAsk() {
   const box = document.getElementById("ask-text");
   const status = document.getElementById("ask-status");
+  // Never hand over a message with a blank field or an unfilled {{PLACEHOLDER}} (checked on the edited text).
+  const check = window.Rules.checkDraft({ ...(currentDraft || {}), body: box.value });
+  status.classList.toggle("bad", !check.ok);
+  if (!check.ok) {
+    status.textContent = `Not copied: ${check.problem}`;
+    return;
+  }
   try {
     await navigator.clipboard.writeText(box.value);
     status.textContent = "Copied. Paste it into the chat.";
@@ -208,4 +235,4 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 window.askButton = askButton;
-window.askDrafts = { draftForJob, draftForOrder, draftForDecision, draftForIncident, draftForBrain, draftForCommsJob, suggestedBuilder };
+window.askDrafts = { draftForJob, draftForOrder, draftForDecision, draftForIncident, draftForBrain, draftForCommsJob, draftForConfirm, suggestedBuilder };

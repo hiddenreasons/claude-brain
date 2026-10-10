@@ -7,16 +7,21 @@ import os
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import flow, foundation, gitread, ops, selfcheck
+from .codex import read_codex
 from .comms import TAIL_BYTES as COMMS_TAIL
 from .comms import comms_path, parse_comms
 from .config import Config
 from .inbox import parse_inbox
 from .labels import job_action, order_action
 from .mac_runs import scan_flat_jobs, scan_job_folders
+from .machines import read_heartbeat, remote_jobs
 from .readers import FileCache, clip, iso, mtime_iso, read_tail, read_text
 from .status_files import parse_issues, parse_status
+from .windows_status import read_windows_status
 
 ONESHOT_LIMIT = 150  # newest one-shot jobs sent to the page; the total count is reported too
 ATTENTION_WINDOW_S = 72 * 3600  # older problems are history, not alerts
@@ -147,7 +152,42 @@ def _comms_evidence(job: dict, comms: List[dict], since: str) -> List[tuple]:
     return found
 
 
-def apply_followups(jobs: List[dict], entries: List[dict], comms: List[dict]) -> None:
+def _decision_evidence(job: dict, decisions: List[dict], status_at: Optional[str], since: str) -> List[tuple]:
+    """A settled line in "Open decisions" that names the job (~~…~~ DONE/MERGED/…), seen after the report."""
+    if not status_at or status_at <= since:
+        return []
+    name = re.compile(rf"\b{re.escape(job['id'])}\b", re.I)
+    return [
+        (status_at, f"STATUS.md decision: {clip(d['text'], 200)}", True)
+        for d in decisions
+        if d.get("settled") and d.get("word") != "DROPPED" and name.search(d["text"])
+    ]
+
+
+def _git_evidence(job: dict, since: str) -> List[tuple]:
+    """The job's own worktree moved on after its report: a newer commit, or that commit merged into main."""
+    wt = Path(job["path"]) / "wt" if job.get("path") else None
+    if wt is None or not gitread.is_worktree(wt):
+        return []
+    found = gitread.head(wt)
+    if not found:
+        return []
+    sha, ts = found
+    at = iso(ts)
+    if not since or at <= since:
+        return []
+    merged = gitread.merged_into(wt, "main")
+    how = "merged into main" if merged else "committed in the job's worktree"
+    return [(at, f"git: {sha[:7]} {how} after the report", True)]
+
+
+def apply_followups(
+    jobs: List[dict],
+    entries: List[dict],
+    comms: List[dict],
+    decisions: Optional[List[dict]] = None,
+    status_at: Optional[str] = None,
+) -> None:
     """Clear a stuck job (folder or one-shot) when MAC says it's resolved after the report.
 
     For a one-shot with no result, MAC's word only counts after the order was sent.
@@ -160,7 +200,13 @@ def apply_followups(jobs: List[dict], entries: List[dict], comms: List[dict]) ->
         if job["state"] not in STUCK_STATES and job["state"] != "followed_up":
             continue
         since = job.get("report_at") or job.get("stream_updated_at") or job.get("sent_at") or ""
-        evidence = _status_evidence(job, entries, since) + _comms_evidence(job, comms, since)
+        # Recheck before any alert: STATUS.md change log and decisions, MAC's log, and the job's git state.
+        evidence = (
+            _status_evidence(job, entries, since)
+            + _comms_evidence(job, comms, since)
+            + _decision_evidence(job, decisions or [], status_at, since)
+            + _git_evidence(job, since)
+        )
         if not evidence:
             continue
         at, why, resolved = max(evidence, key=lambda e: e[0])
@@ -184,7 +230,17 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     comms, comms_skipped = cache.get(
         comms_path(cfg.runs_dir), "comms", lambda p: parse_comms(read_tail(p, COMMS_TAIL) or "")
     )
-    apply_followups(folders + oneshots, status.get("entries", []), comms)
+    for job in oneshots:
+        job["machine"] = "MAC"
+    apply_followups(
+        folders + oneshots,
+        status.get("entries", []),
+        comms,
+        status.get("decision_items", []),
+        mtime_iso(cfg.status_path),
+    )
+    heartbeat = read_heartbeat(cfg.runs_dir, now)
+    remote = remote_jobs(comms, folders + oneshots, heartbeat, now)
     # One flag the page trusts for fix-request buttons, so the rule lives in one place.
     for job in folders + oneshots:
         job.update(job_action(job))
@@ -193,7 +249,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     # Only NEEDS ANTHONY items get a fix-request button.
     for item in folders + oneshots + inbox:
         item["alertable"] = item["action"] == "needs_anthony"
-    return {
+    snapshot = {
         "generated_at": iso(now),
         "sources": {
             "inbox": _source(cfg.inbox_path),
@@ -203,6 +259,8 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
             "comms": {**_source(comms_path(cfg.runs_dir)), "optional": True},
         },
         "attention": build_attention(inbox, folders, oneshots, now),
+        "windows": heartbeat,
+        "remote_jobs": remote,
         "running_count": sum(j["state"] == "running" for j in folders) + sum(j["state"] == "waiting" for j in oneshots),
         "folders": folders,
         "oneshots": oneshots[:ONESHOT_LIMIT],
@@ -212,3 +270,56 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         "issues": issues,
         "_comms": (comms, comms_skipped),  # internal: the server reuses it, never sent to the page
     }
+    # One lifecycle, proof, who's up next and drift for every item; then the self-check line.
+    snapshot["foundation"] = foundation.apply(snapshot, comms)
+    for job in folders:
+        job.pop("report_head", None)
+    # Codex picture jobs (read-only): running ones, failures for MAC, today's counts.
+    snapshot["codex"] = read_codex(cfg.runs_dir, now)
+    snapshot["mac_attention"] = [
+        {
+            "source": "codex",
+            "id": j["job"],
+            "state": "failed",
+            "title": f"Codex {j['job']} failed",
+            "detail": j["result"] or "no result given",
+            "machine": j["machine"],
+            "at": j["ended_at"],
+            "up_next": "MAC",
+        }
+        for j in snapshot["codex"]["failed"]
+    ]
+    snapshot["windows_box"] = read_windows_status(cfg.runs_dir, now, snapshot["codex"]["running"])
+    # Operations: usage, loops, restart storms, time in state, decision IDs, branch hygiene, conflicts.
+    snapshot["ops"] = ops.apply(snapshot, cfg.vader_dir, cfg.runs_dir, now, comms)
+    # Restart storms and possible loops are MAC's to look at, never Anthony's.
+    snapshot["mac_attention"] += [
+        {
+            "source": "restart",
+            "id": s["id"],
+            "state": "restart storm",
+            "title": f"{s['id']}: restart storm",
+            "detail": s["why"],
+            "machine": "MAC",
+            "at": s["since"],
+            "up_next": "MAC",
+        }
+        for s in snapshot["ops"]["storms"]
+    ] + [
+        {
+            "source": "loop",
+            "id": lp["id"],
+            "state": "possible loop",
+            "title": f"{lp['id']}: possible loop",
+            "detail": lp["why"],
+            "machine": "MAC",
+            "at": None,
+            "up_next": "MAC",
+        }
+        for lp in snapshot["ops"]["loops"]
+    ]
+    # Flow on both machines and the waste in it (advisor.py turns findings into recommendations for MAC).
+    machines_flow = flow.metrics(snapshot, now, flow.mac_free_memory_pct())
+    snapshot["flow"] = {"machines": machines_flow, "findings": flow.findings(snapshot, machines_flow, now)}
+    snapshot["selfcheck"] = selfcheck.run(snapshot, cfg.status_path, cfg.runs_dir, now)
+    return snapshot

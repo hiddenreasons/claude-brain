@@ -8,6 +8,7 @@
   <script src="/volley.js" defer></script>
   <script src="/synapse.js" defer></script>
   <script src="/readable.js" defer></script>
+  <script src="/rules.js" defer></script>
   <script src="/brains.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/hud.js" defer></script>
@@ -25,12 +26,15 @@
     </div>
     <button type="button" class="update-btn" id="update-btn" title="Re-check every source now (cleared errors, new jobs, replies)">⟳ Update</button>
     <button type="button" class="motion-toggle" id="motion-toggle" aria-pressed="false">Motion</button>
+    <button type="button" class="motion-toggle" id="mine-toggle" aria-pressed="false" title="Show only items where Anthony is up next">Only mine</button>
     <label class="search">
       <span class="visually-hidden">Search jobs and work orders</span>
       <input id="search" type="search" placeholder="grep jobs, orders, messages…" autocomplete="off">
     </label>
   </header>
 
+  <p class="selfcheck" id="selfcheck" role="status" hidden></p>
+  <p class="overdue" id="overdue" role="alert" hidden></p>
   <section class="statusbar" id="statusbar" aria-label="At a glance"></section>
   <p class="legend" aria-label="What the badges mean">
     <span class="legend-k">legend</span>
@@ -49,6 +53,7 @@
       <div class="hero-readout hero-left" id="readout-mac" aria-label="MAC right now"></div>
       <div class="hero-readout hero-right" id="readout-claude" aria-label="Claude right now"></div>
       <div class="bolt-tip" id="bolt-tip" role="tooltip" hidden></div>
+      <div class="win-box" id="win-box" aria-label="Windows machine, from windows-status.json"></div>
     </div>
   </section>
 
@@ -101,6 +106,30 @@
       <section aria-labelledby="h-changelog" class="panel">
         <h2 id="h-changelog">MAC change log</h2>
         <ul class="bullets" id="changelog"></ul>
+      </section>
+
+      <section aria-labelledby="h-flow" class="panel">
+        <h2 id="h-flow">Flow &amp; advisor</h2>
+        <p class="source">Both machines · the Brain recommends to MAC, never acts</p>
+        <div id="flow"></div>
+      </section>
+
+      <section aria-labelledby="h-learning" class="panel">
+        <h2 id="h-learning">Learning</h2>
+        <p class="source">Drafts only: nothing changes until Anthony or MAC approves a lesson</p>
+        <div id="learning"></div>
+      </section>
+
+      <section aria-labelledby="h-ops" class="panel">
+        <h2 id="h-ops">Operations</h2>
+        <p class="source">Shown only: the Brain never changes jobs, branches or files</p>
+        <ul class="ops" id="ops"></ul>
+      </section>
+
+      <section aria-labelledby="h-audit" class="panel">
+        <h2 id="h-audit">Audit trail</h2>
+        <p class="source">Append-only · every alert, clear, decision and bug · ~/.vader-mac-runs/brain/audit.jsonl</p>
+        <ol class="audit" id="audit"></ol>
       </section>
 
       <section aria-labelledby="h-incidents" class="panel">

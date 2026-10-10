@@ -11,7 +11,7 @@
   const PALETTE = ["#fff07a", "#b18cff", "#b6f04a", "#3fe58f", "#5b6cff", "#e8e8ff"];
   const BOLT_MS = 800; // one shot: 0.6 to 1 s
   const LAND_MS = 450; // glow on the receiving node
-  const FLASH_MS = 700; // reduced motion: both nodes flash, nothing moves
+  const FLASH_MS = 1600; // reduced motion: both nodes glow, nothing moves (long enough to notice)
   const MAX_BOLTS = 3;
   const GAP_MS = 160; // a beat between shots so a burst reads as a volley
 

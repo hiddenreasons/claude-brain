@@ -18,8 +18,9 @@ class Config:
     host: str = "127.0.0.1"
     port: int = DEFAULT_PORT
     poll_seconds: float = 2.0
-    vault_dir: Optional[Path] = None  # Obsidian vault; the only folder the Brain writes to
+    vault_dir: Optional[Path] = None  # Obsidian vault export (its own notes only)
     export: bool = True
+    record: bool = True  # write the Brain's own logs and pages into brain_dir (and nowhere else)
 
     @property
     def inbox_path(self) -> Path:
@@ -28,6 +29,11 @@ class Config:
     @property
     def status_path(self) -> Path:
         return self.runs_dir / "STATUS.md"
+
+    @property
+    def brain_dir(self) -> Path:
+        """The Brain's own folder: the only place it writes its logs and pages (Anthony, 2026-10-09)."""
+        return self.runs_dir / "brain"
 
     @property
     def issues_path(self) -> Path:

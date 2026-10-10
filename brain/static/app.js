@@ -24,7 +24,28 @@ const actionBadge = (action) => el("span", { class: `act act-${action}` }, ACTIO
 const JOB_LIST_LIMIT = 80;
 const FRESH_MS = 90_000;
 
-const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false }, openNode: null };
+const ui = { query: "", openOrders: new Set(), doneOpen: { jobs: false, orders: false }, openNode: null, mine: false };
+
+// "Only mine": Anthony's view shows only items where he is up next (brain/foundation.py).
+const mineOnly = (item) => !ui.mine || (item && item.up_next === "Anthony");
+
+// Next / proof / drift for one job or work order: who acts next, the proof behind a DONE, and any
+// disagreement between STATUS.md, REPORT.md and git.
+function foundationLine(item) {
+  const bits = [];
+  if (item.up_next) bits.push(el("span", { class: `nx nx-${item.up_next.toLowerCase()}`, title: "Who's up next" }, `Next: ${item.up_next}`));
+  if (item.proof) bits.push(el("span", { class: "proof", title: "Proof behind DONE" }, `✔ ${item.proof.kind} ${item.proof.text}`));
+  else if (item.verified === false) bits.push(el("span", { class: "unverified", title: "DONE without a commit, test result or file path" }, "UNVERIFIED"));
+  for (const why of item.drift || []) bits.push(el("span", { class: "drift", title: why }, "DRIFT"), el("span", { class: "drift-why" }, why));
+  if (item.lifecycle_why && item.lifecycle !== "running") bits.push(el("span", { class: "life-why" }, item.lifecycle_why));
+  if (item.state_since && item.lifecycle && item.lifecycle !== "done" && item.lifecycle !== "resolved") {
+    bits.push(el("span", { class: "since", title: `${item.lifecycle} since ${item.state_since}` }, `${item.lifecycle} ${elapsed(item.state_since)}`));
+  }
+  for (const flag of item.flags || []) bits.push(el("span", { class: "flag-red", title: flag }, flag.split(":")[0]));
+  if (item.known_issue) bits.push(el("span", { class: "known", title: item.known_issue }, `KNOWN ISSUE ${item.known_issue.split(":")[0]}`));
+  if (item.no_decision_id) bits.push(el("span", { class: "unverified", title: "Briefs written since the decision log started must cite the A-xxx IDs they follow" }, "NO A-ID"));
+  return bits.length ? el("div", { class: "fnd" }, bits) : null;
+}
 const demoMode = new URLSearchParams(location.search).has("demo");
 let snap = null;
 let firstLoad = true;
@@ -119,13 +140,14 @@ const FAMILY = {
 };
 const family = (state) => FAMILY[state] || "idle";
 
-// STATUS.md decisions: "~~Push/merge X~~ DONE 09:00 …" is settled; anything else still needs Anthony.
-const SETTLED_RE = /^~~[\s\S]+?~~\s*(DONE|DECIDED|APPROVED|DROPPED|RESOLVED|MERGED|CANCELLED|CANCELED)\b/i;
-function decisionState(text) {
-  const m = SETTLED_RE.exec(text.trim());
-  return m ? { settled: true, word: m[1].toUpperCase() } : { settled: false, word: "NEEDS YOU" };
-}
-const openDecisions = () => snap.status.decisions.filter((d) => !decisionState(d).settled);
+// STATUS.md decisions, judged by the server (brain/guard.py): "~~Push/merge X~~ DONE 09:00 …" is settled;
+// "confirm it's done" checks go to MAC; everything else open is Anthony's.
+const decisionItems = () => (snap.status.decision_items || []);
+const openDecisions = () => decisionItems().filter((i) => !i.settled && i.route === "anthony").map((i) => i.text);
+const decisionIds = (ids) => (ids || []).map((id) => {
+  const known = (snap.status.decision_log || {})[id];
+  return el("span", { class: "dec-id", title: known ? `${id} · ${known.when || ""} · ${known.text}` : `${id} (not in the decision log)` }, id);
+});
 
 const badge = (state) => el("span", { class: `badge s-${state} fam-${family(state)}` }, STATE_LABELS[state] || state);
 const money = (usd) => (typeof usd === "number" ? `$${usd.toFixed(2)} list-price est.` : null);
@@ -224,6 +246,7 @@ function jobCard(job) {
   },
     el("div", { class: "card-top" }, actionBadge(job.action), el("span", { class: "card-title" }, md(job.title || job.id))),
     jobMeta(job),
+    foundationLine(job),
     actionLine(job),
     jobLine(job),
   );
@@ -270,6 +293,8 @@ function actionLine(item) {
 function groupedList(listId, items, cardFn, which) {
   const groups = Object.fromEntries(ACTIONS.map(([a]) => [a, []]));
   for (const item of items) (groups[item.action] || groups.queued).push(item);
+  // What has waited on Anthony longest goes first.
+  groups.needs_anthony.sort((a, b) => (a.state_since || "~").localeCompare(b.state_since || "~"));
   const nodes = [];
   for (const [action, title] of ACTIONS.slice(0, 3)) {
     if (!groups[action].length) continue;
@@ -295,7 +320,7 @@ function groupedList(listId, items, cardFn, which) {
 }
 
 function renderJobs() {
-  const jobs = allJobs().filter((j) => matches(j.title, j.id, j.report_headline, j.result_preview, j.prompt_preview));
+  const jobs = allJobs().filter((j) => mineOnly(j) && matches(j.title, j.id, j.report_headline, j.result_preview, j.prompt_preview));
   const groups = groupedList("jobs", jobs, jobCard, "jobs");
   const live = jobs.length - groups.done.length;
   document.getElementById("jobs-count").textContent = `${live} live · ${groups.done.length} done`;
@@ -323,26 +348,29 @@ function activeRows() {
     if (j.state !== "running" && j.state !== "waiting") { stopped.add(j.id); continue; }
     const folder = j.kind === "folder";
     rows.push({
-      id: jobKey(j), job: j.id, title: j.title || j.id, where: "This Mac",
+      id: jobKey(j), job: j.id, title: j.title || j.id, where: "MAC", machine: "MAC",
       who: folder ? `Claude · ${[j.model, j.effort].filter(Boolean).join(" ")}`.replace(/ · $/, "") : "Claude (one-shot)",
       doing: folder ? lastAction(j.activity) || "starting" : "waiting for its result",
       started: folder ? localTime(j.started) : j.sent_at, moved: folder ? j.stream_updated_at : j.sent_at,
       open: () => openDetail(j.kind, j.id, j.title),
     });
   }
-  const running = new Set((snap.comms && snap.comms.running) || []);
-  for (const name of running) {
-    if (stopped.has(name) || rows.some((r) => r.job === name)) continue;
+  const beat = snap.windows || {};
+  for (const rj of snap.remote_jobs || []) {
+    if (rj.state !== "running" || stopped.has(rj.id) || rows.some((r) => r.job === rj.id)) continue;
+    const name = rj.id;
     const ms = (snap.messages || []).filter((m) => m.ref && m.ref.job === name && m.at); // newest first
     const last = ms[0], start = ms.find((m) => m.mac_kind === "job_started") || ms[ms.length - 1];
     const how = last && last.text.match(/\((opus|sonnet|haiku|fable)[^)]*\)/i);
+    const onBeat = rj.machine === "WINDOWS" && beat.fresh && beat.job === name;
     rows.push({
-      id: `comms:${name}`, job: name, title: start ? plain(start.text) : name,
-      where: (last && MACHINES[last.machine]) || "Off this Mac",
+      id: `comms:${name}`, job: name, title: start ? plain(start.text) : name, machine: rj.machine,
+      where: rj.machine === "WINDOWS" ? "WINDOWS" : "MAC",
       who: how ? `Claude · ${how[0].slice(1, -1).toLowerCase()}` : "Claude",
-      // MAC logs a job's start and finish, not its steps: say so rather than repeat the job's description
-      doing: last && last !== start ? plain(last.text) : "Started; MAC has logged nothing since",
-      started: start && start.at, moved: last && last.at,
+      // MAC logs a job's start and finish, not its steps; a fresh Windows heartbeat has its last log line
+      doing: onBeat && beat.last_log_line ? plain(beat.last_log_line)
+        : last && last !== start ? plain(last.text) : "Started; MAC has logged nothing since",
+      source: rj.source, started: rj.started_at, moved: onBeat ? beat.at : rj.last_at,
       open: () => { const n = brains && brains.findNode(`mac:${name}`); if (n) { document.querySelector(".hero").scrollIntoView({ behavior: "smooth" }); openNodePopup(n); } },
     });
   }
@@ -352,6 +380,14 @@ function activeRows() {
       id: `wo:${e.id}`, job: e.wo !== null ? window.Volley.woKey(e.wo) : "Work order", title: plain(e.title),
       where: "—", who: e.action_who || "—", doing: plain(e.status_text || ""), started: null, moved: null,
       open: () => revealOrder(e.id),
+    });
+  }
+  for (const c of (snap.codex && snap.codex.running) || []) {
+    rows.push({
+      id: `codex:${c.job}`, job: c.job, title: "Codex picture job", where: c.machine, machine: c.machine,
+      who: "Codex", doing: `making pictures${c.output_dir ? ` → ${c.output_dir}` : ""}`,
+      started: c.started_at, moved: c.started_at, source: "codex-status.jsonl",
+      open: () => document.getElementById("messages").scrollIntoView({ behavior: "smooth", block: "center" }),
     });
   }
   return rows.sort((a, b) => (b.moved || "").localeCompare(a.moved || ""));
@@ -364,7 +400,7 @@ const elapsed = (iso) => {
 };
 
 function renderRunning() {
-  const rows = activeRows().filter((r) => matches(r.job, r.title, r.doing));
+  const rows = ui.mine ? [] : activeRows().filter((r) => matches(r.job, r.title, r.doing));
   document.getElementById("running-count").textContent = rows.length || "";
   const box = document.getElementById("running");
   if (!rows.length) {
@@ -385,7 +421,7 @@ function renderRunning() {
     },
       el("td", {}, el("span", { class: "act act-in_progress" }, "▶ IN PROGRESS")),
       el("td", { class: "active-job" }, el("b", {}, r.job), el("span", {}, clipText(r.title, 90))),
-      el("td", {}, r.where),
+      el("td", {}, el("span", { class: `machine m-${r.where.toLowerCase()}`, title: r.source || "" }, r.where)),
       el("td", {}, r.who),
       el("td", { class: "active-doing" }, clipText(r.doing, 140)),
       el("td", { class: "active-num" }, r.started ? clock(r.started) : "—"),
@@ -398,18 +434,26 @@ function renderRunning() {
 // ---------- attention, decisions, orders, logs ----------
 
 function renderAttention() {
-  const items = snap.attention.filter((a) => matches(a.title, a.detail));
+  const items = snap.attention.filter((a) => matches(a.title, a.detail)
+    && mineOnly(a.source === "job" ? findJob(a.kind, a.id) : findOrder(a.id)));
   const panel = document.getElementById("attention-panel");
   panel.classList.toggle("has-items", items.length > 0);
   document.getElementById("attention-count").textContent = items.length || "";
   const base = document.body.classList.contains("demo-mode") ? "SAMPLE MODE · Claude Brain" : "Claude Brain";
   document.title = items.length ? `(${items.length}) ${base}` : base;
   const box = document.getElementById("attention");
+  const forMac = (snap.mac_attention || []).filter((a) => !ui.mine && matches(a.title, a.detail));
+  const macList = forMac.length ? el("div", { class: "for-mac" },
+    el("p", { class: "for-mac-h" }, `For MAC, not you (${forMac.length})`),
+    el("ul", { class: "bullets" }, forMac.map((a) => el("li", {},
+      el("span", { class: "badge fam-bad" }, "FAILED"), " ", el("b", {}, a.title), ` · ${a.detail}`,
+      a.at ? ` · ${relTime(a.at)}` : "", el("span", { class: "via" }, " → MAC")))),
+  ) : null;
   if (!items.length) {
     const older = [...allJobs(), ...snap.inbox].filter((i) => i.action === "needs_anthony").length;
     box.replaceChildren(empty(older
       ? `Nothing new in the last 3 days. ${older} older item${older === 1 ? "" : "s"} still marked ▲ NEEDS ANTHONY in the lists below.`
-      : "Nothing stuck. No blocked work orders, failed gates, stalled or errored jobs in the last 3 days."));
+      : "Nothing stuck. No blocked work orders, failed gates, stalled or errored jobs in the last 3 days."), macList || "");
     return;
   }
   box.replaceChildren(el("ol", { class: "list" }, items.map((a) => {
@@ -425,21 +469,30 @@ function renderAttention() {
       return window.askDrafts.draftForOrder(findOrder(a.id));
     };
     return el("li", {}, withAsk(card, ask(build)));
-  })));
+  })), macList || "");
 }
 
 function renderDecisions() {
-  const items = snap.status.decisions.filter((d) => matches(d)).map((d) => ({ d, ...decisionState(d) }));
-  items.sort((a, b) => Number(a.settled) - Number(b.settled));
-  const open = items.filter((i) => !i.settled).length;
+  const items = decisionItems().filter((i) => mineOnly(i) && matches(i.text));
+  const rank = (i) => (i.settled ? 2 : i.route === "anthony" ? 0 : 1);
+  items.sort((a, b) => rank(a) - rank(b));
+  const open = items.filter((i) => !i.settled && i.route === "anthony").length;
   document.getElementById("decisions-count").textContent = open ? String(open) : "";
   const list = document.getElementById("decisions");
-  list.replaceChildren(...(items.length
-    ? items.map((i) => el("li", { class: i.settled ? "decision settled" : "decision open", title: i.settled ? i.d : null },
-      el("span", { class: `badge ${i.settled ? "fam-good" : "fam-open"}` }, i.word), " ",
-      md(i.d),
-      i.settled ? null : el("span", {}, " ", ask(() => window.askDrafts.draftForDecision(i.d), "Copy my decision"))))
-    : [el("li", { class: "empty" }, "Nothing listed.")]));
+  const row = (i) => {
+    const cls = i.settled ? "decision settled" : i.route === "mac" ? "decision mac" : "decision open";
+    const fam = i.settled ? "fam-good" : i.route === "mac" ? "fam-handled" : "fam-open";
+    const action = i.settled ? null
+      : i.route === "mac" ? ask(() => window.askDrafts.draftForConfirm(i.text), "Ask MAC to confirm")
+      : ask(() => window.askDrafts.draftForDecision(i.text), "Copy my decision");
+    return el("li", { class: cls, title: i.settled ? i.text : null },
+      el("span", { class: `badge ${fam}` }, i.word), " ",
+      ...decisionIds(i.ids), " ",
+      md(i.text),
+      i.via ? el("span", { class: "via" }, ` → ${i.via}`) : null,
+      action ? el("span", {}, " ", action) : null);
+  };
+  list.replaceChildren(...(items.length ? items.map(row) : [el("li", { class: "empty" }, "Nothing listed.")]));
 }
 
 function orderCard(entry) {
@@ -458,6 +511,7 @@ function orderCard(entry) {
         entry.from && el("span", {}, `from ${entry.from}`),
         entry.replies.length ? el("span", {}, `${entry.replies.length} replies`) : null,
       ),
+      foundationLine(entry),
       actionLine(entry),
       entry.status_text && entry.action !== "in_progress" ? el("p", { class: "line muted" }, md(entry.status_text)) : null,
     ),
@@ -478,7 +532,7 @@ function orderCard(entry) {
 }
 
 function renderOrders() {
-  const entries = snap.inbox.filter((e) => matches(e.title, e.status_text, e.body, ...e.replies.map((r) => r.text)));
+  const entries = snap.inbox.filter((e) => mineOnly(e) && matches(e.title, e.status_text, e.body, ...e.replies.map((r) => r.text)));
   const groups = groupedList("orders", entries, orderCard, "orders");
   document.getElementById("orders-count").textContent = `${entries.length - groups.done.length} live · ${groups.done.length} done`;
 }
@@ -538,7 +592,11 @@ function handleMessages(s) {
     return;
   }
   // Oldest first; volley.js keeps at most three bolts in flight and queues the rest.
-  fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m) => brains && brains.fire(m));
+  fresh.slice(0, MAX_BOLTS_PER_UPDATE).reverse().forEach((m) => {
+    if (!brains) return;
+    if (m.direction === "codex") brains.spark("mac", `codex:${m.ref.job}`); // Codex reports to MAC: a spark, not a bolt
+    else brains.fire(m);
+  });
 }
 
 function openMessage(m) {
@@ -565,6 +623,9 @@ let termPrimed = false;
 
 // What happened, as one small badge. Display only: read from fields the server already sends.
 function messageStatus(m) {
+  if (m.direction === "codex") {
+    return m.mac_kind === "failed" ? ["FAILED", "bad"] : m.mac_kind === "finished" ? ["DONE", "good"] : ["STARTED", "run"];
+  }
   if (m.blocked && !m.cleared) return ["BLOCKED", "bad"];
   if (m.cleared) return ["CLEARED", "good"];
   if (m.mac_kind === "job_started") return ["STARTED", "run"];
@@ -605,7 +666,7 @@ function renderTerminal() {
     const isNew = termPrimed && !termSeen.has(m.id);
     termSeen.add(m.id);
     const open = m.blocked && !m.cleared; // a blocked report MAC resolved since is history, not an alert
-    const [from, to] = m.direction === "to_claude" ? ["MAC", "CLAUDE"] : ["CLAUDE", "MAC"];
+    const [from, to] = m.direction === "codex" ? ["CODEX", "MAC"] : m.direction === "to_claude" ? ["MAC", "CLAUDE"] : ["CLAUDE", "MAC"];
     const kind = window.BrainsVisual ? window.BrainsVisual.kindLabel(m.kind) : m.kind;
     const [word, fam] = messageStatus(m);
     const onWindows = m.machine === "windows";
@@ -663,6 +724,9 @@ function renderStatus() {
       openDecisions().length ? "var(--mac)" : "var(--done)", "decisions-panel"),
     statTile("stuck", stuck, stuck ? snap.attention[0].title : "nothing blocked or failing", stuck ? "var(--accent)" : "var(--done)", "attention-panel"),
     statTile("msgs_24h", day.length, `${toClaude} MAC→Claude · ${day.length - toClaude} Claude→MAC`, "var(--claude)", "messages"),
+    statTile("codex_today", ((snap.codex || {}).today || {}).done || 0,
+      `${((snap.codex || {}).today || {}).pictures || 0} pictures · ${((snap.codex || {}).running || []).length} running`,
+      "#10a37f", "messages"),
     statTile("last_msg", last ? relTime(last.at).replace(" ago", "") : "—",
       last ? `${last.direction === "to_claude" ? "MAC→Claude" : "Claude→MAC"}: ${last.text}` : "none yet",
       last && last.blocked && !last.cleared ? "var(--accent)" : "var(--text)", "messages"),
@@ -676,13 +740,15 @@ function readoutLine(key, value, tone) {
 }
 
 const lastActionSig = new Map();
+const lastLogMove = new Map();
+let lastBeat = null;
 let pulsesPrimed = false;
 
 function renderHero() {
   // Both readouts use the same list as the Active now table, so they never disagree with it.
   const active = activeRows();
   const running = snap.folders.filter((j) => j.state === "running"); // their tool calls spark below
-  const here = active.filter((r) => r.where === "This Mac").length;
+  const here = active.filter((r) => r.where === "MAC").length;
   const lastToClaude = (snap.messages || []).find((m) => m.at && m.direction === "to_claude");
   const macActive = lastToClaude && Date.now() - Date.parse(lastToClaude.at) < 30 * 60000;
   const out = active.filter((r) => !r.id.startsWith("wo:")).length; // jobs MAC has out with Claude
@@ -714,20 +780,33 @@ function renderHero() {
     toClaude: hour.filter((m) => m.direction === "to_claude").length,
     toMac: hour.filter((m) => m.direction === "to_mac").length,
   });
-  // Each new tool call in a running job pulses Claude's brain with its name.
+  // Real activity makes the stations spark: each new tool call or reply in a running job (with its name),
+  // or, when there's no new action, its log moving at all. A fresh Windows heartbeat tick sparks MAC's.
   for (const j of running) {
     const actions = j.activity || [];
-    const sig = actions.length ? JSON.stringify(actions[actions.length - 1]) + actions.length : "";
+    const lastKey = actions.length ? JSON.stringify(actions[actions.length - 1]) : "";
     const before = lastActionSig.get(j.id);
-    lastActionSig.set(j.id, sig);
-    if (!pulsesPrimed || before === undefined || before === sig) continue;
-    const prevIndex = actions.findIndex((a) => JSON.stringify(a) + "" === before);
-    const fresh = actions.slice(Math.max(prevIndex + 1, actions.length - 4));
-    fresh.forEach((a, i) => setTimeout(() => {
-      brains.pulse(a.kind === "tool" ? a.name : "thinking");
-      brains.spark("claude", j.id); // synapse: the job's node sparks on Claude's station
-    }, i * 300));
+    const movedBefore = lastLogMove.get(j.id);
+    lastActionSig.set(j.id, lastKey);
+    lastLogMove.set(j.id, j.stream_updated_at);
+    if (!pulsesPrimed || before === undefined) continue;
+    let fresh = [];
+    if (lastKey !== before) {
+      const prev = actions.findIndex((a) => JSON.stringify(a) === before); // -1 when it scrolled out
+      fresh = actions.slice(prev >= 0 ? prev + 1 : Math.max(0, actions.length - 1)).slice(-4);
+    }
+    if (fresh.length) {
+      fresh.forEach((a, i) => setTimeout(() => {
+        brains.pulse(a.kind === "tool" ? a.name : "thinking");
+        brains.spark("claude", j.id); // synapse: the job's node sparks on Claude's station
+      }, i * 300));
+    } else if (j.stream_updated_at && j.stream_updated_at !== movedBefore) {
+      brains.spark("claude", j.id); // its log moved: Claude is working, even without a new tool call
+    }
   }
+  const beat = snap.windows || {};
+  if (pulsesPrimed && beat.fresh && beat.job && beat.at && beat.at !== lastBeat) brains.spark("mac", beat.job);
+  lastBeat = beat.at;
   pulsesPrimed = true;
 }
 
@@ -806,6 +885,13 @@ function stationNodes() {
       kindLabel: "Waiting on Anthony", sub: clipText(text, 40), ref: { type: "decision", text: d },
     });
   });
+  for (const c of (snap.codex && snap.codex.running) || []) {
+    mac.push({
+      id: `codex:${c.job}`, key: `codex:${c.job}`, codex: true, label: `CODEX ${c.job.split("-")[0]}`, title: c.job,
+      action: "in_progress", kindLabel: `Codex picture job · ${c.machine}`, sub: `started ${relTime(c.started_at)}`,
+      ref: { type: "codex", job: c.job },
+    });
+  }
   return { claude, mac };
 }
 
@@ -961,12 +1047,151 @@ function startDemo() {
   }, 650);
 }
 
+// One green or red line: STATUS.md readable, Windows heartbeat fresh, no stale locks, no placeholders.
+function renderSelfcheck() {
+  const sc = snap.selfcheck;
+  const box = document.getElementById("selfcheck");
+  if (!sc) { box.hidden = true; return; }
+  box.hidden = false;
+  box.className = `selfcheck ${sc.ok ? "ok" : "bad"}`;
+  box.title = sc.checks.map((c) => `${c.ok ? "✔" : "✖"} ${c.name}: ${c.detail}`).join("\n");
+  box.replaceChildren(el("b", {}, sc.ok ? "✔ SELF-CHECK" : "✖ SELF-CHECK"), " ", sc.line);
+  const mine = document.getElementById("mine-toggle");
+  mine.textContent = ui.mine ? "Showing only mine · show all" : `Only mine (${(snap.foundation && snap.foundation.mine) || 0})`;
+  mine.setAttribute("aria-pressed", String(ui.mine));
+}
+
+// The audit trail: every alert, clear, decision and bug the Brain recorded (append-only).
+function renderAudit() {
+  const rows = (snap.audit || []).filter((a) => matches(a.job, a.change, a.event));
+  document.getElementById("audit").replaceChildren(...(rows.length ? rows.map((a) => el("li", {},
+    el("span", { class: "a-time" }, a.at ? clock(a.at) : "—"),
+    el("span", { class: `a-ev a-${a.event}` }, a.event),
+    el("span", { class: "a-job" }, a.job || "—"),
+    el("span", { class: "a-change" }, clipText(a.change || "", 160)),
+    el("span", { class: "a-who" }, a.who || ""),
+  )) : [el("li", { class: "empty" }, "Nothing recorded yet.")]));
+}
+
+// The WINDOWS box between the Death Stars: a short terminal list from windows-status.json.
+function renderWinBox() {
+  const w = snap.windows_box || {};
+  const box = document.getElementById("win-box");
+  const when = w.updated_at ? new Date(w.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never";
+  const dots = (name, width = 18) => `${name} ${".".repeat(Math.max(2, width - name.length))}`;
+  const lines = w.offline
+    ? [el("div", { class: "wb-line wb-offline" }, "offline", el("span", { class: "wb-why" }, ` · ${w.reason}`))]
+    : !w.jobs.length
+      ? [el("div", { class: "wb-line wb-none" }, "no jobs")]
+      : w.jobs.map((j) => el("div", { class: "wb-line" },
+        el("span", { class: "wb-name" }, dots(j.name)), " ",
+        el("span", { class: `wb-st wb-${j.state.toLowerCase().replace(/\s+/g, "-")}` }, j.state)));
+  const acc = w.accepting || {};
+  const accepting = el("div", { class: `wb-acc ${acc.known ? (acc.yes ? "yes" : "no") : "unknown"}` },
+    "ACCEPTING JOBS: ", acc.known ? (acc.yes ? "yes" : `no${acc.reason ? ` — ${acc.reason}` : ""}`) : "unknown (not in windows-status.json yet)");
+  const rules = (w.rules || []).length ? el("ul", { class: "wb-rules" }, w.rules.map((r) => el("li", {}, r))) : null;
+  box.className = `win-box${w.offline ? " is-offline" : ""}`;
+  box.replaceChildren(el("div", { class: "wb-head" }, el("b", {}, "WINDOWS"), ` · last update ${when}`), ...lines, accepting, rules || "");
+  placeWinBox();
+}
+
+// Between the stations, just under the link (wide screens); below the canvas when they stack.
+function placeWinBox() {
+  const box = document.getElementById("win-box");
+  if (!brains || brains.w < 640) { box.style.removeProperty("top"); return; }
+  const st = brains.stations.mac;
+  box.style.setProperty("top", `${Math.round(st.cy + 22)}px`);
+}
+
+// Anything waiting on Anthony for 30+ minutes, at the top of the page.
+function renderOverdue() {
+  const list = ((snap.ops || {}).overdue || []);
+  const box = document.getElementById("overdue");
+  box.hidden = !list.length;
+  box.replaceChildren(el("b", {}, "WAITING ON YOU"), ...list.slice(0, 4).map((o) =>
+    el("span", { class: "od" }, ` ${o.id}${o.title ? ` · ${clipText(o.title, 60)}` : ""} · ${o.minutes >= 60 ? `${Math.floor(o.minutes / 60)} h ${o.minutes % 60} m` : `${o.minutes} m`}`)));
+}
+
+// Operations: usage, loops, restart storms, conflicts, branch hygiene and decision IDs (shown only).
+function renderOps() {
+  const o = snap.ops || {};
+  const rows = [];
+  const row = (label, tone, ...content) => rows.push(el("li", { class: `op op-${tone}` }, el("span", { class: "op-k" }, label), el("span", { class: "op-v" }, ...content)));
+  const usage = o.usage || {};
+  row("usage", usage.found ? "ok" : "dim", usage.found
+    ? Object.entries(usage.machines).map(([m, u]) => `${m} ${u.left_pct === null ? "?" : `${u.left_pct}% left`}`).join(" · ") || "no machines reported"
+    : usage.note);
+  row("restart storms", (o.storms || []).length ? "bad" : "ok", (o.storms || []).length ? o.storms.map((x) => `${x.id}: ${x.why}`).join(" · ") : "none in the last hour");
+  row("possible loops", (o.loops || []).length ? "warn" : "ok", (o.loops || []).length ? o.loops.map((x) => `${x.id}: ${x.why}`).join(" · ") : "none");
+  row("mac ⇄ windows", (o.conflicts || []).length ? "warn" : "ok", (o.conflicts || []).length ? o.conflicts.map((x) => x.why).join(" · ") : "no shared branch or file");
+  row("decision IDs", (o.no_decision_id || []).length ? "warn" : "ok", (o.no_decision_id || []).length ? `briefs with no A-xxx: ${o.no_decision_id.join(", ")}` : "every live brief cites one");
+  const h = o.hygiene || { merged: [], stale: [], stale_total: 0 };
+  row("merged branches", h.merged.length ? "info" : "ok", h.merged.length ? `${h.merged.length} could be cleaned up: ${h.merged.slice(0, 8).join(", ")}${h.merged.length > 8 ? " …" : ""}` : "none");
+  row("work 24 h+ uncommitted", h.stale_total ? "warn" : "ok", h.stale_total
+    ? `${h.stale_total} files: ${h.stale.slice(0, 5).map((x) => `${x.where} ${x.file} (${x.days} d)`).join(", ")}` : "none");
+  document.getElementById("ops").replaceChildren(...rows);
+}
+
+// Flow on both machines, and the advisor's recommendations for MAC (it recommends, never acts).
+function renderFlow() {
+  const f = snap.flow || { machines: {}, findings: [] };
+  const m = (x) => (x === null || x === undefined ? "—" : x);
+  const mac = f.machines.MAC || {}, win = f.machines.WINDOWS || {};
+  const row = (label, ...vals) => el("tr", {}, el("th", { scope: "row" }, label), ...vals.map((v) => el("td", {}, String(v))));
+  const table = el("table", { class: "flow-table" },
+    el("thead", {}, el("tr", {}, el("th", {}, ""), el("th", { scope: "col" }, "MAC"), el("th", { scope: "col" }, "WINDOWS"))),
+    el("tbody", {},
+      row("running", m(mac.running), win.known ? m(win.running) : "?"),
+      row("queue", m(mac.queue), win.known ? m(win.queue) : "?"),
+      row("idle", mac.idle_min ? `${mac.idle_min} min` : mac.idle_min === 0 ? "busy" : "—", win.idle_min ? `${win.idle_min} min` : win.idle_min === 0 ? "busy" : "—"),
+      row("avg job (24 h)", mac.avg_job_min ? `${mac.avg_job_min} min (${mac.jobs_24h})` : "—", "—"),
+      row("wait on Anthony", `${m(mac.wait_on_anthony_min)} min`, "—"),
+      row("cost per job", mac.cost_per_job ? `$${mac.cost_per_job}` : "—", "—"),
+      row("free memory", mac.free_memory_pct !== null && mac.free_memory_pct !== undefined ? `${mac.free_memory_pct}%` : "—", "—"),
+    ));
+  const recs = (snap.recommendations || []);
+  const recList = recs.length ? el("ol", { class: "recs" }, recs.slice(0, 8).map((r) => el("li", { class: `rec rec-${r.status}` },
+    el("span", { class: "rec-id" }, r.id), el("span", { class: `rec-st st-${r.status}` }, r.status.toUpperCase()),
+    el("span", { class: "rec-what" }, r.what), el("span", { class: "rec-opt" }, `→ ${r.option}`),
+    r.result ? el("span", { class: "rec-res" }, `Did it help? ${r.result.verdict}`) : null,
+  ))) : empty("No recommendations: nothing wasteful spotted.");
+  document.getElementById("flow").replaceChildren(table, el("p", { class: "for-mac-h" }, "Recommendations for MAC · ~/.vader-mac-runs/brain/RECOMMENDATIONS.md"), recList);
+}
+
+// Self-learning: post-mortems, proposed lessons (drafts until Anthony or MAC approves) and weekly stats.
+function renderLearning() {
+  const l = snap.learning || { proposed: [], approved: [], weekly: {}, recent_postmortems: [] };
+  const w = l.weekly || {};
+  const stat = (k, v) => el("span", { class: "ls" }, el("b", {}, v === null || v === undefined ? "—" : String(v)), ` ${k}`);
+  const stats = el("p", { class: "learn-stats" }, "This week: ", stat("alerts", w.alerts), " · ", stat("false", w.false_alerts),
+    " · ", stat("duplicates", w.duplicates), " · ", stat("min median to clear", w.median_clear_min));
+  const lessonRow = (x) => el("li", { class: `rec rec-${x.status}` },
+    el("span", { class: "rec-id" }, x.id), el("span", { class: `rec-st st-${x.status === "approved" ? "applied" : x.status === "proposed" ? "open" : "declined"}` }, x.status.toUpperCase()),
+    el("span", { class: "rec-what" }, x.title), el("span", { class: "rec-opt" }, `Draft: ${x.draft}`));
+  const lessons = [...(l.proposed || []), ...(l.approved || [])];
+  const lessonList = lessons.length ? el("ol", { class: "recs" }, lessons.slice(0, 8).map(lessonRow)) : empty("No lessons proposed: nothing has repeated yet.");
+  const pms = (l.recent_postmortems || []);
+  const pmList = pms.length ? el("ol", { class: "pms" }, pms.map((p) => el("li", {},
+    el("span", { class: "a-job" }, p.job), el("span", { class: "pm-life" }, p.lifecycle),
+    el("span", { class: "pm-text" }, `${clipText(p.happened || "", 120)} · slowed: ${p.slowed} · fixed: ${clipText(p.fixed || "", 80)}`)))) : empty("No post-mortems yet.");
+  document.getElementById("learning").replaceChildren(stats,
+    el("p", { class: "for-mac-h" }, "Proposed lessons · ~/.vader-mac-runs/brain/PROPOSED-LESSONS.md"), lessonList,
+    el("p", { class: "for-mac-h" }, "Recent post-mortems · LEARNING-LOG.md"), pmList);
+}
+
 function renderAll() {
   if (!snap) return;
   if (window.renderHud) window.renderHud(snap);
   renderStatus();
   renderHero();
   renderTerminal();
+  renderSelfcheck();
+  renderOverdue();
+  renderOps();
+  renderFlow();
+  renderLearning();
+  renderAudit();
+  renderWinBox();
   renderAttention();
   renderRunning();
   renderJobs();
@@ -1104,11 +1329,21 @@ function tick() {
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("search").addEventListener("input", (ev) => { ui.query = ev.target.value.trim(); renderAll(); });
   document.getElementById("update-btn").addEventListener("click", updateNow);
+  document.getElementById("mine-toggle").addEventListener("click", () => { ui.mine = !ui.mine; renderAll(); });
+  window.addEventListener("resize", () => setTimeout(placeWinBox, 50));
   document.getElementById("detail-close").addEventListener("click", () => document.getElementById("detail").close());
   if (window.BrainsVisual) {
     const motion = window.BrainsVisual.motion;
     const toggle = document.getElementById("motion-toggle");
-    toggle.textContent = motion.calm ? "Motion: Calm" : "Motion: Full";
+    toggle.textContent = motion.calm ? (motion.systemCalm && !motion.choice ? "Motion: Calm (Mac setting)" : "Motion: Calm") : "Motion: Full";
+    if (motion.calm) {
+      // Say why the stations are still: with Reduce Motion on, Safari and Chrome both ask for calm motion.
+      document.querySelector(".brains-stage").append(el("p", { class: "calm-note" },
+        motion.systemCalm && !motion.choice
+          ? "Calm motion: this Mac's Reduce Motion setting is on, so messages show as a brief glow on both jobs instead of bolts. "
+          : "Calm motion is on, so messages show as a brief glow on both jobs instead of bolts. ",
+        el("button", { type: "button", onclick: () => window.BrainsVisual.setMotion("full") }, "Show bolts and sparks")));
+    }
     toggle.setAttribute("aria-pressed", String(!motion.calm));
     toggle.title = motion.systemCalm
       ? "Your system has Reduce Motion on. Choose Full to see the live animation here anyway."

@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from .guard import decision_item
 from .readers import clip
 
 SECTION_RE = re.compile(r"^##\s+(?:\d+\.\s*)?(?P<title>.+?)\s*$")
@@ -81,14 +82,40 @@ def _change_log(sections: Dict[str, List[str]]) -> List[str]:
     return log
 
 
+DECISION_LOG_RE = re.compile(r"^(?P<id>A-\d{3})\s+(?P<when>\d{4}-\d{2}-\d{2}(?:\s+\d{1,2}:\d{2})?)?:?\s*(?P<text>.*)$")
+
+
+def _decision_log(sections: Dict[str, List[str]]) -> Dict[str, Dict[str, Any]]:
+    """The "Decision log (IDs)" section: A-001 … with their date and text."""
+    log: Dict[str, Dict[str, Any]] = {}
+    for title, lines in sections.items():
+        if "decision log" not in title:
+            continue
+        for b in _top_bullets(lines):
+            m = DECISION_LOG_RE.match(b)
+            if m:
+                log[m.group("id")] = {"when": m.group("when"), "text": clip(m.group("text"), 300)}
+    return log
+
+
 def parse_status(text: Optional[str]) -> Dict[str, Any]:
     if not text:
-        return {"decisions": [], "changelog": [], "entries": [], "running_note": None}
+        return {
+            "decisions": [],
+            "decision_items": [],
+            "decision_log": {},
+            "changelog": [],
+            "entries": [],
+            "running_note": None,
+        }
     sections = _sections(text)
     running_lines = [ln for ln in _find(sections, "running") if ln.strip()]
     log = _change_log(sections)
     return {
         "decisions": [clip(b, 600) for b in _top_bullets(_find(sections, "decision"))],
+        # The same lines with who they are really for ("confirm done" goes to MAC) and their A-xxx IDs.
+        "decision_items": [decision_item(clip(b, 600)) for b in _top_bullets(_find(sections, "decision"))],
+        "decision_log": _decision_log(sections),
         "changelog": [clip(b, 600) for b in log][-15:][::-1],
         # Every timed entry, for matching follow-ups to jobs (not sent to the page).
         "entries": [{"at": entry_time(b), "text": b} for b in log if entry_time(b)],

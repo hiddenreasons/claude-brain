@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Optional
 
+from .guard import is_confirm_done
 from .readers import clip
 
 ALERT_STATES = {"blocked", "stalled", "gate_failed", "no_report", "error"}
@@ -91,6 +92,9 @@ def order_action(entry: Dict[str, Any]) -> Dict[str, Any]:
     if state in ("DONE", "NOTE"):
         return label("done")
     status = entry.get("status_text") or ""
+    if is_confirm_done(f"{entry.get('title', '')} {status}"):
+        # Checking that something is done is MAC's job (VADER c3), never a question for Anthony.
+        return label("queued", "MAC to confirm it's done (VADER c3)", "MAC")
     status_behind = _behind(status)
     queue_behind = _queue_behind(entry)
     if status_behind and OWNER_FIRST_RE.search(status_behind):

@@ -16,6 +16,7 @@
     to_mac: "Claude reply",
     report: "Report written",
     job_result: "Job result",
+    codex: "Codex",
   };
 
   // Motion follows the system's Reduce Motion setting unless the viewer picked Full or Calm on the page.
@@ -169,7 +170,15 @@
       this.resize();
       // Light on CPU: nothing is drawn while the stations are scrolled out of view.
       new IntersectionObserver((entries) => { this.visible = entries.some((e) => e.isIntersecting); }).observe(canvas);
-      new ResizeObserver(() => this.resize()).observe(canvas);
+      // The readout boxes (and the sample-mode banner) sit over the canvas: watch them too, so the stations
+      // always start below them, however long their text gets.
+      const watcher = new ResizeObserver(() => this.resize());
+      watcher.observe(canvas);
+      for (const box of canvas.parentElement.querySelectorAll(".hero-readout")) watcher.observe(box);
+      new MutationObserver(() => {
+        for (const box of canvas.parentElement.querySelectorAll(".demo-banner")) watcher.observe(box);
+        this.resize();
+      }).observe(canvas.parentElement, { childList: true });
       // A new screen density (window moved to another display) re-sizes the backing store, so lines stay sharp.
       const watchDpr = () => {
         const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
@@ -268,9 +277,24 @@
         a.R = R; b.R = R;
         return;
       }
-      const R = Math.min(w * 0.12, h * 0.24), cy = h * 0.47;
+      // Keep clear of the readout boxes: the spin-axis label sits about 1.3 R above the centre, and the name
+      // plates about 1.45 R + 48 px below it.
+      const top = this.overlayBottom() + 14;
+      const R = Math.max(40, Math.min(w * 0.12, (h - top - 56) / 2.75));
+      const cy = top + R * 1.3;
       a.cx = w * 0.27; a.cy = cy; a.R = R;
       b.cx = w * 0.73; b.cy = cy; b.R = R;
+    }
+
+    // The lowest edge of anything drawn over the top of the canvas (readouts, sample banner), in canvas px.
+    overlayBottom() {
+      const top = this.canvas.getBoundingClientRect().top;
+      let bottom = 0;
+      for (const box of this.canvas.parentElement.querySelectorAll(".hero-readout, .demo-banner")) {
+        const r = box.getBoundingClientRect();
+        if (r.height) bottom = Math.max(bottom, r.bottom - top);
+      }
+      return bottom;
     }
 
     frame(t) {
@@ -482,6 +506,13 @@
           ctx.setLineDash([3, 3]); ctx.lineDashOffset = this.calm ? 0 : -t / 40; ctx.stroke(); ctx.setLineDash([]);
           ctx.beginPath(); ctx.arc(x, y, d + 4.5 * sc, 0, 7); ctx.strokeStyle = rgba(RED, 0.14 * fz); ctx.lineWidth = 3; ctx.stroke();
           if (!this.calm && fz > 0.3) { const u = (t % 1800) / 1800; ctx.beginPath(); ctx.arc(x, y, d + 6 + u * 16, 0, 7); ctx.strokeStyle = rgba(RED, 0.55 * (1 - u)); ctx.lineWidth = 1; ctx.stroke(); }
+        } else if (n.codex) {
+          // a Codex picture job: a small square in Codex green, a dot, and the running arc
+          const d = 4.4 * sc, cc = [16, 163, 127];
+          ctx.beginPath(); ctx.rect(x - d, y - d, d * 2, d * 2); ctx.fillStyle = rgba(cc, 0.25); ctx.fill();
+          ctx.strokeStyle = rgba([60, 220, 170], 1); ctx.lineWidth = 1.3; ctx.stroke();
+          dot(1.2 * sc, "rgba(255,255,255,.95)");
+          if (fz > 0.3) { const a0 = this.calm ? 0 : t / 500; ctx.beginPath(); ctx.arc(x, y, d + 3.5 * sc, a0, a0 + 1.3); ctx.strokeStyle = "rgba(120,240,200,.9)"; ctx.lineWidth = 1; ctx.stroke(); }
         } else if (act === "in_progress") {
           // working: thin ring, centre dot, a short arc running round it
           const rr = 4.2 * sc;
@@ -506,7 +537,13 @@
         // reduced motion: the message shows as a still flash on both nodes, nothing moves
         for (const f of this.volley.flashes) {
           if (f.key !== n.key || (f.from !== st.key && f.to !== st.key)) continue;
-          ctx.beginPath(); ctx.arc(x, y, 9 * sc, 0, 7); ctx.strokeStyle = rgba(hexRgb(f.color) || LINK, 0.95); ctx.lineWidth = 2; ctx.stroke();
+          // a still glow in the job's colour: a soft disc and two rings, no movement
+          const fc = hexRgb(f.color) || LINK;
+          const g = ctx.createRadialGradient(x, y, 0, x, y, 20 * sc);
+          g.addColorStop(0, rgba(fc, 0.55)); g.addColorStop(1, rgba(fc, 0));
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 20 * sc, 0, 7); ctx.fill();
+          ctx.beginPath(); ctx.arc(x, y, 9 * sc, 0, 7); ctx.strokeStyle = rgba(fc, 1); ctx.lineWidth = 2.2; ctx.stroke();
+          ctx.beginPath(); ctx.arc(x, y, 14 * sc, 0, 7); ctx.strokeStyle = rgba(fc, 0.6); ctx.lineWidth = 1; ctx.stroke();
         }
         const la = sstep(0.1, 0.32, z) || (sel || twin ? 1 : 0);
         if (la > 0 && (act !== "done" || twin)) labels.push({ n, x, y, z, r: 7 * sc, a: twin ? 1 : la * base, sel: sel || twin });
