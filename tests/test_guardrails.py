@@ -12,7 +12,7 @@ import pytest
 from brain import gitread
 from brain.brainfiles import BrainFiles, WriteRefusedError
 from brain.effects import Recorder
-from brain.guard import decision_item, placeholders
+from brain.guard import decision_item, placeholders, unfilled
 from brain.labels import order_action
 from brain.machines import read_heartbeat, remote_jobs
 from brain.readers import FileCache, iso
@@ -161,11 +161,23 @@ def test_a_placeholder_never_becomes_a_title_and_the_bug_is_logged_once(tree, tm
     snapshot, counts = snap_and_record(tree, files)
     found = next(j for j in snapshot["folders"] if j["id"] == "deathstarmotion")
     assert "{{" not in found["title"] and found["title"] == "deathstarmotion: Death Star motion pass (Opus high)"
-    assert found["placeholders"] == ["STATUS_SHA12", "STATUS_MD"]
-    assert counts["bugs"] == 1
+    # The STATUS tokens are launch tokens the harness fills into iter-N.prompt: not a bug in the brief.
+    assert found["placeholders"] == [] and counts["bugs"] == 0
+    # Left unfilled in the prompt Claude was sent: that is the bug, logged once.
+    write(job / "iter-1.jsonl", "{}\n")
+    write(job / "iter-1.prompt", "HANDOFF READ: VADER deathstar-motion | STATUS sha256=ff29c037de00\n{{STATUS_MD}}\n")
+    snapshot, counts = snap_and_record(tree, files)
+    found = next(j for j in snapshot["folders"] if j["id"] == "deathstarmotion")
+    assert found["placeholders"] == ["STATUS_MD"] and counts["bugs"] == 1
     _, again = snap_and_record(tree, files)
     assert again["bugs"] == 0
     assert placeholders("plain text") == []
+
+
+def test_a_brief_with_an_unknown_placeholder_is_a_bug_and_a_filled_prompt_is_not():
+    assert unfilled("Do {{TASK}} on {{STATUS_MD}}") == ["TASK"]
+    assert unfilled("HANDOFF {{STATUS_SHA12}}\n{{STATUS_MD}}", "HANDOFF ff29c037de00\nstatus text") == []
+    assert unfilled("{{STATUS_SHA256}}", "sha={{STATUS_SHA256}}") == ["STATUS_SHA256"]
 
 
 def test_a_placeholder_brief_with_no_task_line_uses_its_own_heading(tree):

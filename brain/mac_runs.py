@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .guard import DECISION_ID_RE, PLACEHOLDER_RE, placeholders
+from .guard import DECISION_ID_RE, PLACEHOLDER_RE, placeholders, unfilled
 from .readers import FileCache, clip, iso, mtime_iso, read_tail, read_text
 
 MSG_RE = re.compile(r"^msg(?P<id>[A-Za-z0-9_-]+)\.txt$")
@@ -308,6 +308,10 @@ def _job_folder(path: Path, children: Dict[str, os.DirEntry], cache: FileCache, 
     done = latest is not None and f"iter-{latest}.done" in children
 
     runs = parse_runs_log(cache.get(path / "runs.log", "text", lambda p: read_text(p, 64 * 1024)))
+    prompt_name = f"iter-{latest}.prompt" if latest is not None else None
+    prompt = (
+        cache.get(path / prompt_name, "text", lambda p: read_text(p, 512 * 1024)) if prompt_name in children else None
+    )
     report_head = cache.get(path / "REPORT.md", "head", lambda p: read_text(p, 2048))
     report_headline = _first_line(report_head, 400) if report_head else None
     brief = cache.get(path / "brief.md", "head", lambda p: read_text(p, 256 * 1024))
@@ -370,7 +374,7 @@ def _job_folder(path: Path, children: Dict[str, os.DirEntry], cache: FileCache, 
         "title": _safe_title(brief, path.name),
         "machine": "MAC",
         "path": str(path),
-        "placeholders": placeholders(brief),
+        "placeholders": unfilled(brief, prompt),
         "decision_ids": sorted(set(DECISION_ID_RE.findall(brief or ""))),
         "brief_at": iso(mtime("brief.md")) if mtime("brief.md") else None,
         "state": state,

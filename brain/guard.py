@@ -35,6 +35,17 @@ def placeholders(text: Optional[str]) -> List[str]:
     return seen
 
 
+# Launch tokens: briefs carry them on purpose; run-template.sh fills them into <job>/iter-N.prompt at launch.
+HARNESS_TOKENS = ("STATUS_SHA12", "STATUS_SHA256", "STATUS_MD")
+
+
+def unfilled(brief: Optional[str], prompt: Optional[str] = None) -> List[str]:
+    """Real template bugs: placeholders in the brief other than the launch tokens, and any placeholder
+    still left in the prompt Claude was actually sent (the latest iter-N.prompt)."""
+    out = [n for n in placeholders(brief) if n not in HARNESS_TOKENS]
+    return out + [n for n in placeholders(prompt) if n not in out]
+
+
 def is_confirm_done(text: Optional[str]) -> bool:
     return bool(CONFIRM_DONE_RE.search(text or ""))
 
