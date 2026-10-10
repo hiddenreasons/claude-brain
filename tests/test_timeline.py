@@ -109,3 +109,18 @@ def test_macs_lane_marks_each_job_mac_sent():
     t = timeline.build(snap(), MESSAGES, NOW)
     assert [(k["label"], k["machine"]) for k in t["ticks"]] == [("antidrift", "mac"), ("sbatch01", "windows")]
     assert t["lanes"]["mac"] == []  # no Codex jobs on the Mac in this sample
+
+
+def test_windows_status_start_and_end_times_draw_a_full_bar():
+    s = snap()
+    s["windows"]["recent"].append(
+        {
+            "job": "review02",
+            "started_at": "2026-10-09T20:30:00-04:00",
+            "ended_at": "2026-10-09T20:47:22-04:00",
+            "first_line": "TO MAC: DONE",
+        }
+    )
+    win = bars(timeline.build(s, MESSAGES, NOW)["lanes"]["windows"])
+    assert win["review02"]["start"] == "2026-10-10T00:30:00+00:00"
+    assert win["review02"]["end"] == "2026-10-10T00:47:22+00:00" and win["review02"]["state"] == "done"

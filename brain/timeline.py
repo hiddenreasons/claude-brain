@@ -1,8 +1,8 @@
 """The 3-lane timeline: what ran when on Claude (this Mac), MAC and Windows, over the last day.
 
 Bars: {id, label, start, end (None while running), state, title, open}. `start` can be None when only the
-finish was logged (a Windows job MAC never logged starting); the page draws those as a short mark at
-`end`. Ticks on MAC's lane are the messages MAC sent. Read-only: built from the snapshot.
+finish was logged (an older Windows entry with no started_at that MAC never logged starting); the page
+draws those as a short mark at `end`. Ticks on MAC's lane are the messages MAC sent. Read-only: built from the snapshot.
 """
 
 from __future__ import annotations
@@ -97,11 +97,17 @@ def _windows_lane(snapshot: Dict[str, Any], messages: List[Dict[str, Any]], sinc
     out, seen = [], set()
     remote = {r["id"]: r for r in snapshot.get("remote_jobs", []) if r.get("machine") == "WINDOWS"}
     for r in (snapshot.get("windows") or {}).get("recent") or []:
-        job, end = r.get("job"), _t(r.get("finished_at"))
+        job, end = r.get("job"), _t(r.get("ended_at") or r.get("finished_at"))
         if not job or not end or end < since or job in seen:
             continue
         seen.add(job)
-        start = _t((remote.get(job) or {}).get("started_at")) or _started_from_messages(messages, job)
+        # windows-status.json carries started_at for recent jobs (MAC, 2026-10-09); older entries fall back
+        # to MAC's log, else only the finish is drawn.
+        start = (
+            _t(r.get("started_at"))
+            or _t((remote.get(job) or {}).get("started_at"))
+            or _started_from_messages(messages, job)
+        )
         state = "blocked" if "BLOCKED" in str(r.get("first_line") or "") else "done"
         out.append(
             _bar(
