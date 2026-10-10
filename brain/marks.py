@@ -24,6 +24,7 @@ MARKS_FILE = "owner-marks.jsonl"
 KINDS = ("folder", "oneshot", "remote")
 ACTIONS = ("done", "undo")
 MARKABLE = ("blocked", "stalled")  # plus "done" that the Brain couldn't verify
+BLOCKED_REPORT = "TO MAC: BLOCKED"
 
 
 def snapshot_of(kind: str, job: Dict[str, Any]) -> Dict[str, Any]:
@@ -39,7 +40,11 @@ def snapshot_of(kind: str, job: Dict[str, Any]) -> Dict[str, Any]:
 
 def markable(job: Dict[str, Any]) -> bool:
     life = job.get("lifecycle")
-    return life in MARKABLE or (life == "done" and job.get("verified") is False)
+    if life in MARKABLE or (life == "done" and job.get("verified") is False):
+        return True
+    # A job on another machine that finished with a BLOCKED report: the Brain shows it ended, but it still
+    # reads as waiting on someone, so Anthony can mark it done too.
+    return life != "running" and BLOCKED_REPORT in f"{job.get('source') or ''} {job.get('last_text') or ''}"
 
 
 def read_marks(brain_dir: Path) -> Dict[str, Dict[str, Any]]:

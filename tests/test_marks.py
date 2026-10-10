@@ -263,3 +263,16 @@ def test_a_refused_or_oversized_post_closes_the_connection(server):  # noqa: F81
     res.read()
     assert res.status == 403 and res.getheader("Connection", "").lower() == "close"
     conn.close()
+
+
+def test_a_windows_job_that_ended_blocked_can_be_marked_but_a_running_one_cannot():
+    blocked = {
+        "id": "review01",
+        "machine": "WINDOWS",
+        "lifecycle": "done",
+        "verified": None,
+        "source": "windows-status.json: finished 2026-10-10T00:51:32+00:00 (TO MAC: BLOCKED permission deny)",
+    }
+    assert marks.markable(blocked)
+    assert not marks.markable({**blocked, "lifecycle": "running"})
+    assert not marks.markable({**blocked, "source": "windows-status.json: finished ... (TO MAC: DONE)"})

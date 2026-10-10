@@ -280,7 +280,9 @@ async function sendMark(kind, id, action, btn, shown) {
 }
 
 // Only a job shown as blocked or stalled, or done without proof, can be marked: never a running or queued one.
-const markableJob = (item) => ["blocked", "stalled"].includes(item.lifecycle) || (item.lifecycle === "done" && item.verified === false);
+// (Same rule as marks.markable on the server, including a remote job that ended with a BLOCKED report.)
+const markableJob = (item) => ["blocked", "stalled"].includes(item.lifecycle) || (item.lifecycle === "done" && item.verified === false)
+  || (item.lifecycle !== "running" && `${item.source || ""} ${item.last_text || ""}`.includes("TO MAC: BLOCKED"));
 
 function markControl(kind, id, item) {
   if (!item || !id) return null;
