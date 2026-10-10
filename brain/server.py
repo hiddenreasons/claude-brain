@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlsplit
 
-from . import timeline
-from .brainfiles import BrainFiles
+from . import marks, timeline
+from .brainfiles import BrainFiles, audit
 from .codex import codex_messages
 from .comms import merge
 from .config import Config
@@ -115,6 +115,7 @@ class BrainState:
             self._known_ids = {
                 "oneshot": {j["id"] for j in snapshot["oneshots"]} | self._all_oneshot_ids(),
                 "folder": {j["id"] for j in snapshot["folders"]},
+                "remote": {j["id"] for j in snapshot["remote_jobs"]},
             }
             self.version += 1
             self.cond.notify_all()
@@ -160,6 +161,7 @@ class BrainState:
 
 def make_handler(state: BrainState):
     allowed_hosts = {f"127.0.0.1:{state.cfg.port}", f"localhost:{state.cfg.port}", f"[::1]:{state.cfg.port}"}
+    allowed_origins = {f"http://{h}" for h in allowed_hosts}
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "ClaudeBrain"
@@ -253,7 +255,49 @@ def make_handler(state: BrainState):
         def _not_allowed(self) -> None:
             self._error(HTTPStatus.METHOD_NOT_ALLOWED, "read-only: GET only")
 
-        do_POST = do_PUT = do_PATCH = do_DELETE = _not_allowed  # noqa: N815
+        do_PUT = do_PATCH = do_DELETE = _not_allowed  # noqa: N815
+
+        def do_POST(self) -> None:  # noqa: N802 (http.server naming)
+            # The one write: Anthony's "Mark done", recorded in the Brain's own folder. Only this page can send
+            # it: loopback Host and Origin, a JSON body and a custom header (a cross-site form can't do both).
+            if urlsplit(self.path).path != "/api/mark":
+                self._not_allowed()
+                return
+            if (
+                self.headers.get("Host", "") not in allowed_hosts
+                or self.headers.get("Origin", "") not in allowed_origins
+                or self.headers.get("X-Brain-Action") != "mark"
+                or not self.headers.get("Content-Type", "").startswith("application/json")
+            ):
+                self._error(HTTPStatus.FORBIDDEN, "marks come only from the Brain's own page")
+                return
+            if state.files is None:
+                self._error(HTTPStatus.SERVICE_UNAVAILABLE, "recording is off")
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(min(length, 2048)) or b"{}") if 0 < length <= 2048 else None
+            except ValueError:
+                body = None
+            if not isinstance(body, dict):
+                self._error(HTTPStatus.BAD_REQUEST, "send {kind, id, action}")
+                return
+            kind, job_id, action = body.get("kind"), body.get("id"), body.get("action")
+            if (
+                kind not in marks.KINDS
+                or action not in marks.ACTIONS
+                or not isinstance(job_id, str)
+                or not is_safe_id(job_id)
+                or not state.knows(kind, job_id)
+            ):
+                self._error(HTTPStatus.NOT_FOUND, "unknown job")
+                return
+            record = state.files.append(
+                marks.MARKS_FILE, {"kind": kind, "id": job_id, "action": action, "who": "Anthony"}
+            )
+            audit(state.files, "owner-mark", job_id, "marked done" if action == "done" else "mark undone", "Anthony")
+            state.refresh(force=True)
+            self._json(HTTPStatus.OK, {"ok": True, "mark": record})
 
     return Handler
 

@@ -42,6 +42,12 @@ function foundationLine(item) {
     bits.push(el("span", { class: "since", title: `${item.lifecycle} since ${item.state_since}` }, `${item.lifecycle} ${elapsed(item.state_since)}`));
   }
   for (const flag of item.flags || []) bits.push(el("span", { class: "flag-red", title: flag }, flag.split(":")[0]));
+  if (item.owner_mark) {
+    const m = item.owner_mark;
+    bits.push(m.verified
+      ? el("span", { class: "marked ok", title: `You marked it done ${relTime(m.at)}; proof: ${m.proof.kind} ${m.proof.text}` }, `✔ MARKED DONE · VERIFIED (${m.proof.kind})`)
+      : el("span", { class: "marked unv", title: `You marked it done ${relTime(m.at)}; no commit, test result, file or STATUS.md line yet. MAC confirms.` }, "MARKED DONE · UNVERIFIED"));
+  }
   if (item.known_issue) {
     bits.push(el("span", { class: "known", title: `Approved lesson ${item.known_issue.id}: handled by MAC, not alerted` }, `KNOWN ISSUE ${item.known_issue.id}`),
       el("span", { class: "life-why" }, `Fix: ${item.known_issue.fix}`));
@@ -242,6 +248,44 @@ function withAsk(card, askBtn) {
   return askBtn ? el("div", { class: "card-wrap" }, card, askBtn) : card;
 }
 
+// ---------- Anthony's "Mark done" ----------
+// For a job he knows finished but the Brain doesn't show as completed. The Brain records the mark in its own
+// folder (never touches the job), then verifies it: proof found = VERIFIED; none = UNVERIFIED and MAC confirms.
+async function sendMark(kind, id, action, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = action === "done" ? "Marking…" : "Undoing…"; }
+  try {
+    const res = await fetch("/api/mark", {
+      method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-Brain-Action": "mark" },
+      body: JSON.stringify({ kind, id, action }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+    await load("/api/snapshot");
+    if (ui.openNode && brains) openNodePopup(brains.findNode(ui.openNode), true);
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = `Couldn't save: ${err.message}`; }
+  }
+}
+
+function markControl(kind, id, item) {
+  if (!item || !id) return null;
+  const m = item.owner_mark;
+  if (m) {
+    const undo = el("button", { type: "button", class: "mark-btn undo", onclick: (ev) => { ev.stopPropagation(); sendMark(kind, id, "undo", undo); } }, "Undo mark");
+    return el("span", { class: "mark-ctl" }, undo);
+  }
+  if (["done", "resolved"].includes(item.lifecycle) || item.action === "done") return null;
+  const btn = el("button", {
+    type: "button", class: "mark-btn", title: "You know it finished: record it. The Brain then looks for proof (commit, tests, file, STATUS.md).",
+    onclick: (ev) => { ev.stopPropagation(); sendMark(kind, id, "done", btn); },
+  }, "✔ Mark done");
+  return el("span", { class: "mark-ctl" }, btn);
+}
+
+function remoteJob(key) {
+  return (snap.remote_jobs || []).find((r) => r.id === key) || null;
+}
+
 function jobCard(job) {
   const card = el("button", {
     type: "button", class: `card tone-${family(job.state)}${isFresh(jobKey(job)) ? " fresh" : ""}`, "data-key": jobKey(job),
@@ -256,7 +300,8 @@ function jobCard(job) {
   const askBtn = job.alertable
     ? ask(() => window.askDrafts.draftForJob(findJob(job.kind, job.id) || job))
     : null;
-  return el("li", {}, withAsk(card, askBtn));
+  const side = [askBtn, markControl(job.kind, job.id, job)].filter(Boolean);
+  return el("li", {}, side.length ? el("div", { class: "card-wrap" }, card, ...side) : card);
 }
 
 function activityList(actions, limit) {
@@ -551,6 +596,14 @@ function renderTimeline() {
 
 // ---------- attention, decisions, orders, logs ----------
 
+// What each "For MAC" item is: a failure, something to confirm, or a known issue with its fix.
+function macBadge(a) {
+  const [word, fam] = {
+    "owner-mark": ["CONFIRM", "warn"], "known-issue": ["KNOWN ISSUE", "info"], restart: ["RESTARTS", "bad"], loop: ["LOOP?", "warn"],
+  }[a.source] || ["FAILED", "bad"];
+  return el("span", { class: `badge fam-${fam}` }, word);
+}
+
 function renderAttention() {
   const items = snap.attention.filter((a) => matches(a.title, a.detail)
     && mineOnly(a.source === "job" ? findJob(a.kind, a.id) : findOrder(a.id)));
@@ -564,7 +617,7 @@ function renderAttention() {
   const macList = forMac.length ? el("div", { class: "for-mac" },
     el("p", { class: "for-mac-h" }, `For MAC, not you (${forMac.length})`),
     el("ul", { class: "bullets" }, forMac.map((a) => el("li", {},
-      el("span", { class: "badge fam-bad" }, "FAILED"), " ", el("b", {}, a.title), ` · ${a.detail}`,
+      macBadge(a), " ", el("b", {}, a.title), ` · ${a.detail}`,
       a.at ? ` · ${relTime(a.at)}` : "", el("span", { class: "via" }, " → MAC")))),
   ) : null;
   if (!items.length) {
@@ -1134,6 +1187,15 @@ function windowsView(node) {
   };
 }
 
+// "Mark done" in a node's popup: Claude jobs here, and jobs MAC logged on other machines.
+function popupMark(node) {
+  const r = node.ref || {};
+  if (r.type === "job") return markControl(r.kind, r.id, findJob(r.kind, r.id));
+  const key = r.type === "comms" ? r.key : null;
+  const remote = key && remoteJob(key);
+  return remote ? markControl("remote", key, remote) : null;
+}
+
 // Anything waiting on Anthony links to VADER, where he acts on it. VADER can't open a given page from a link
 // yet (it reopens the last page), so the button says which tab to go to.
 const VADER_URL = "http://localhost:8765/";
@@ -1170,6 +1232,7 @@ function openNodePopup(node, refresh) {
     el("div", { class: "ds-stream" }, ...view.lines),
     el("div", { class: "ds-acts" },
       view.fix,
+      popupMark(node),
       node.action === "needs_anthony" ? vaderLink(`${node.title || ""} ${view.lines.map((l) => l.textContent).join(" ")}`) : null,
       view.more ? el("button", { type: "button", class: "ds-more", onclick: view.more[1] }, view.more[0]) : null,
     ),
@@ -1510,6 +1573,7 @@ async function openDetail(kind, id, title) {
   const body = document.getElementById("detail-body");
   document.getElementById("detail-title").textContent = title || id;
   body.replaceChildren(empty("Loading…"));
+  const markSlot = () => { const j = findJob(kind, id); const c = markControl(kind, id, j); return c ? el("div", { class: "detail-mark" }, c, foundationLine(j) || "") : null; };
   if (!dialog.open) dialog.showModal();
   try {
     const res = await fetch(`/api/job?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`, { cache: "no-store" });
@@ -1517,6 +1581,7 @@ async function openDetail(kind, id, title) {
     const d = await res.json();
     if (kind === "oneshot") {
       body.replaceChildren(
+        ...[markSlot()].filter(Boolean),
         ...readableSection("MAC's order to Claude", d.prompt),
         ...readableSection("Claude's result", d.result || "(no result yet)"),
         ...section("Errors", d.errors && d.errors.trim()),
@@ -1526,6 +1591,7 @@ async function openDetail(kind, id, title) {
         ? [el("h3", {}, `Live activity (last ${d.activity.length})`), activityList(d.activity, 200)]
         : [];
       body.replaceChildren(
+        ...[markSlot()].filter(Boolean),
         ...readableSection("Report", d.report),
         ...readableSection("Final reply", d.last_result && d.last_result.text),
         ...log,

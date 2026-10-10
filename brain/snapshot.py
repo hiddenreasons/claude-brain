@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import flow, foundation, gitread, ops, selfcheck
+from . import flow, foundation, gitread, marks, ops, selfcheck
 from .codex import read_codex
 from .comms import TAIL_BYTES as COMMS_TAIL
 from .comms import comms_path, parse_comms
@@ -272,6 +272,8 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     }
     # One lifecycle, proof, who's up next and drift for every item; then the self-check line.
     snapshot["foundation"] = foundation.apply(snapshot, comms)
+    # Anthony's "Mark done" (the Brain's own records): verified with proof, or sent to MAC to confirm.
+    owner_confirms = marks.apply(snapshot, marks.read_marks(cfg.brain_dir))
     for job in folders:
         job.pop("report_head", None)
     # Codex picture jobs (read-only): running ones, failures for MAC, today's counts.
@@ -289,6 +291,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
         }
         for j in snapshot["codex"]["failed"]
     ]
+    snapshot["mac_attention"] += owner_confirms
     snapshot["windows_box"] = read_windows_status(cfg.runs_dir, now, snapshot["codex"]["running"])
     # Operations: usage, loops, restart storms, time in state, decision IDs, branch hygiene, conflicts.
     snapshot["ops"] = ops.apply(snapshot, cfg.vader_dir, cfg.runs_dir, now, comms)
