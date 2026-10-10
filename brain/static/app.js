@@ -42,7 +42,10 @@ function foundationLine(item) {
     bits.push(el("span", { class: "since", title: `${item.lifecycle} since ${item.state_since}` }, `${item.lifecycle} ${elapsed(item.state_since)}`));
   }
   for (const flag of item.flags || []) bits.push(el("span", { class: "flag-red", title: flag }, flag.split(":")[0]));
-  if (item.known_issue) bits.push(el("span", { class: "known", title: item.known_issue }, `KNOWN ISSUE ${item.known_issue.split(":")[0]}`));
+  if (item.known_issue) {
+    bits.push(el("span", { class: "known", title: `Approved lesson ${item.known_issue.id}: handled by MAC, not alerted` }, `KNOWN ISSUE ${item.known_issue.id}`),
+      el("span", { class: "life-why" }, `Fix: ${item.known_issue.fix}`));
+  }
   if (item.no_decision_id) bits.push(el("span", { class: "unverified", title: "Briefs written since the decision log started must cite the A-xxx IDs they follow" }, "NO A-ID"));
   return bits.length ? el("div", { class: "fnd" }, bits) : null;
 }
@@ -399,20 +402,41 @@ const elapsed = (iso) => {
   return min < 60 ? `${min} m` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} m`;
 };
 
+// Active now: a 3-lane timeline (Claude, MAC, Windows) by default, or the table. The choice and the time
+// range are remembered in this browser only.
+const TL_RANGES = [3, 6, 12, 24];
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage blocked: keep it for this visit */ } },
+};
+ui.activeView = store.get("brain-active-view", "timeline");
+ui.tlHours = Number(store.get("brain-tl-hours", "6")) || 6;
+
 function renderRunning() {
   const rows = ui.mine ? [] : activeRows().filter((r) => matches(r.job, r.title, r.doing));
   document.getElementById("running-count").textContent = rows.length || "";
   const box = document.getElementById("running");
+  const tab = (view, label) => el("button", {
+    type: "button", class: `tl-tab${ui.activeView === view ? " on" : ""}`, "aria-pressed": String(ui.activeView === view),
+    onclick: () => { ui.activeView = view; store.set("brain-active-view", view); renderRunning(); },
+  }, label);
+  const ranges = ui.activeView === "timeline" ? el("span", { class: "tl-ranges", role: "group", "aria-label": "Time range" },
+    TL_RANGES.map((h) => el("button", {
+      type: "button", class: `tl-range${ui.tlHours === h ? " on" : ""}`, "aria-pressed": String(ui.tlHours === h),
+      onclick: () => { ui.tlHours = h; store.set("brain-tl-hours", String(h)); renderRunning(); },
+    }, `${h} h`))) : null;
+  const controls = el("div", { class: "tl-controls" }, tab("timeline", "Timeline"), tab("table", "Table"), ranges);
+  if (ui.activeView === "timeline") { box.replaceChildren(controls, renderTimeline()); return; }
   if (!rows.length) {
     const next = snap.inbox.find((e) => e.action === "queued");
-    box.replaceChildren(
+    box.replaceChildren(controls,
       empty("Nothing is being worked on right now."),
       next ? el("p", { class: "line muted" }, "Next in the queue: ", md(next.title), next.action_note ? ` (${next.action_note})` : "") : null,
     );
     return;
   }
   const head = ["Status", "Job", "Where", "Who", "Doing now", "Started", "Running for", "Log moved"];
-  box.replaceChildren(el("div", { class: "active-wrap" }, el("table", { class: "active-table" },
+  box.replaceChildren(controls, el("div", { class: "active-wrap" }, el("table", { class: "active-table" },
     el("caption", { class: "visually-hidden" }, "Jobs being worked on right now"),
     el("thead", {}, el("tr", {}, head.map((h) => el("th", { scope: "col" }, h)))),
     el("tbody", {}, rows.map((r) => el("tr", {
@@ -429,6 +453,100 @@ function renderRunning() {
       el("td", { class: "active-num" }, r.moved ? relTime(r.moved) : "—"),
     ))),
   )));
+}
+
+// Greedy packing: bars that overlap in time go on separate rows of their lane.
+function packRows(bars) {
+  const rows = [];
+  for (const b of bars.sort((x, y) => x.s - y.s)) {
+    let r = rows.findIndex((end) => end <= b.s - 0.004);
+    if (r < 0) { r = rows.length; rows.push(0); }
+    rows[r] = b.e;
+    b.row = r;
+  }
+  return Math.max(1, rows.length);
+}
+
+function openTimelineBar(open) {
+  if (!open) return;
+  if (open.type === "job") openDetail(open.kind, open.id, open.id);
+  else if (open.type === "node") openStationNode(open.id);
+}
+
+function renderTimeline() {
+  const t = snap.timeline;
+  if (!t) return empty("No timeline yet.");
+  const now = Date.now(), from = now - ui.tlHours * 3600000, span = now - from;
+  const x = (ms) => Math.max(0, Math.min(1, (ms - from) / span));
+  const pct = (u) => `${(u * 100).toFixed(2)}%`;
+  const tip = el("div", { class: "tl-tip", hidden: true, role: "tooltip" });
+  const showTip = (ev, head, body) => {
+    tip.replaceChildren(el("strong", {}, head), el("span", {}, body || ""));
+    tip.hidden = false;
+    const wrap = ev.currentTarget.closest(".tl").getBoundingClientRect(), r = ev.currentTarget.getBoundingClientRect();
+    tip.style.setProperty("left", `${Math.min(wrap.width - 300, Math.max(0, r.left - wrap.left))}px`);
+    tip.style.setProperty("top", `${r.bottom - wrap.top + 6}px`);
+  };
+  const hideTip = () => { tip.hidden = true; };
+  const STATE_TEXT = { running: "running", done: "done", blocked: "blocked" };
+  const lanes = [["claude", "CLAUDE", "this Mac"], ["mac", "MAC", "Grok Bot"], ["windows", "WINDOWS", "Windows PC"]].map(([key, name, sub]) => {
+    const bars = [];
+    for (const b of t.lanes[key] || []) {
+      const end = b.end ? Date.parse(b.end) : now, start = b.start ? Date.parse(b.start) : null;
+      if (end < from || (start !== null && start > now)) continue;
+      bars.push({ ...b, s: start === null ? x(end) : x(start), e: x(end), mark: start === null });
+    }
+    const rowsN = packRows(bars);
+    const track = el("div", { class: "tl-track" });
+    track.style.setProperty("--rows", String(rowsN));
+    for (const b of bars) {
+      const when = b.mark ? `finished ${clock(b.end)} (start not logged)`
+        : `${clock(b.start)} – ${b.end ? clock(b.end) : "now"} · ${fmtMin(Math.round(((b.end ? Date.parse(b.end) : now) - Date.parse(b.start)) / 60000))}`;
+      const node = el("button", {
+        type: "button", class: `tl-bar st-${b.state}${b.mark ? " mark" : ""}`,
+        "aria-label": `${b.label}, ${STATE_TEXT[b.state] || b.state}, ${when}`,
+        onclick: () => openTimelineBar(b.open),
+        onmouseenter: (ev) => showTip(ev, `${b.label} · ${(STATE_TEXT[b.state] || b.state).toUpperCase()}`, `${when}\n${b.title}`),
+        onmouseleave: hideTip, onfocus: (ev) => showTip(ev, b.label, when), onblur: hideTip,
+      }, b.mark ? "" : el("span", { class: "tl-label" }, b.label));
+      node.style.setProperty("left", pct(b.s));
+      if (!b.mark) node.style.setProperty("width", `max(6px, ${pct(Math.max(0, b.e - b.s))})`);
+      node.style.setProperty("--row", String(b.row));
+      track.append(node);
+    }
+    if (key === "mac") {
+      for (const tk of t.ticks || []) {
+        const at = Date.parse(tk.at);
+        if (at < from) continue;
+        const mark = el("button", {
+          type: "button", class: `tl-tick${tk.machine === "windows" ? " to-win" : ""}`,
+          "aria-label": `MAC sent: ${tk.title}`,
+          onmouseenter: (ev) => showTip(ev, `MAC → ${tk.machine === "windows" ? "Windows" : "Claude"} · ${clock(tk.at)}`, tk.title),
+          onmouseleave: hideTip, onfocus: (ev) => showTip(ev, "MAC sent", tk.title), onblur: hideTip,
+          onclick: () => openStationNode(`mac:${tk.label}`),
+        });
+        mark.style.setProperty("left", pct(x(at)));
+        track.append(mark);
+      }
+    }
+    if (!bars.length && !(key === "mac" && (t.ticks || []).length)) track.append(el("span", { class: "tl-none" }, "nothing in this range"));
+    return el("div", { class: `tl-lane lane-${key}` }, el("div", { class: "tl-name" }, el("b", {}, name), el("span", {}, sub)), track);
+  });
+  // hour marks along the top
+  const axis = el("div", { class: "tl-axis" });
+  const step = ui.tlHours <= 6 ? 3600000 : ui.tlHours <= 12 ? 2 * 3600000 : 4 * 3600000;
+  for (let ms = Math.ceil(from / step) * step; ms < now; ms += step) {
+    const lab = el("span", { class: "tl-hour" }, new Date(ms).toLocaleTimeString([], { hour: "numeric" }));
+    lab.style.setProperty("left", pct(x(ms)));
+    axis.append(lab);
+  }
+  const nowLab = el("span", { class: "tl-hour tl-now-lab" }, "now");
+  nowLab.style.setProperty("left", "100%");
+  axis.append(nowLab);
+  const legend = el("p", { class: "tl-legend" },
+    el("span", { class: "lg run" }, "running"), el("span", { class: "lg done" }, "done"), el("span", { class: "lg blocked" }, "blocked"),
+    el("span", { class: "lg mark" }, "finish only"), el("span", { class: "lg tick" }, "MAC sent a job"), " · hover for detail, click to open");
+  return el("div", { class: "tl" }, el("div", { class: "tl-lane tl-axis-row" }, el("div", { class: "tl-name" }), axis), ...lanes, legend, tip);
 }
 
 // ---------- attention, decisions, orders, logs ----------
@@ -834,7 +952,7 @@ function stationNodes() {
     if (j.action === "done") doneJobs += 1;
     const who = j.action_who ? `${j.action_who}${j.action_at ? ` · ${relTime(j.action_at)}` : ""}` : "";
     claude.push({
-      id: `job:${j.kind}:${j.id}`, key: j.id, label: j.id, title: plain(j.title || j.id), action: j.action,
+      id: `job:${j.kind}:${j.id}`, key: j.id, label: j.id, title: plain(j.title || j.id), action: j.action, since: j.state_since,
       kindLabel: j.kind === "folder" ? "Claude job" : "Claude one-shot",
       sub: plain(j.action === "in_progress" ? who : j.action_note || ""), ref: { type: "job", kind: j.kind, id: j.id },
     });
@@ -843,7 +961,7 @@ function stationNodes() {
     if (e.action === "done") continue;
     claude.push({
       id: `wo:${e.id}`, key: orderKey(e), label: e.wo !== null ? orderKey(e) : clipText(plain(e.title), 22),
-      title: plain(e.title), action: e.action, kindLabel: "Work order", sub: plain(e.action_note || ""), ref: { type: "order", id: e.id },
+      title: plain(e.title), action: e.action, kindLabel: "Work order", since: e.state_since, sub: plain(e.action_note || ""), ref: { type: "order", id: e.id },
     });
   }
 
@@ -863,8 +981,9 @@ function stationNodes() {
     const action = claudeAction.has(key) && own !== "needs_anthony" ? claudeAction.get(key) : own;
     if (action === "done" && Date.now() - Date.parse(last.at) > DAY) continue;
     const onWindows = ms.some((m) => m.machine === "windows");
+    const begun = ms.find((m) => m.mac_kind === "job_started") || ms[ms.length - 1];
     mac.push({
-      id: `mac:${key}`, key, label: key, title: plain(last.text), action,
+      id: `mac:${key}`, key, label: key, title: plain(last.text), action, since: action === "in_progress" ? begun.at : last.at,
       kindLabel: onWindows ? "Windows job" : key.startsWith("WO #") ? "MAC work order" : "MAC job",
       sub: `${onWindows ? "on Windows · " : ""}${relTime(last.at)}`, ref: { type: "comms", key },
     });
@@ -891,7 +1010,7 @@ function stationNodes() {
   for (const c of (snap.codex && snap.codex.running) || []) {
     (c.machine === "WINDOWS" ? windows : mac).push({
       id: `codex:${c.job}`, key: `codex:${c.job}`, codex: true, label: `CODEX ${c.job.split("-")[0]}`, title: c.job,
-      action: "in_progress", kindLabel: `Codex picture job · ${c.machine}`, sub: `started ${relTime(c.started_at)}`,
+      action: "in_progress", kindLabel: `Codex picture job · ${c.machine}`, sub: `started ${relTime(c.started_at)}`, since: c.started_at,
       ref: { type: "codex", job: c.job },
     });
   }
@@ -910,6 +1029,7 @@ function windowsNodes(byKey) {
     const when = r.last_at || r.started_at;
     if (ended && !(when && Date.now() - Date.parse(when) < DAY)) continue;
     add(r.id, {
+      since: r.state_since || when,
       title: plain(r.last_text && !r.last_text.startsWith("{") ? r.last_text : r.id), kindLabel: "Windows job",
       action: ended ? "done" : r.lifecycle === "blocked" ? "needs_anthony" : r.lifecycle === "running" ? "in_progress" : "queued",
       sub: ended ? `finished · ${plain(r.lifecycle_why || "")}` : `${r.lifecycle} · ${relTime(r.state_since || when)}`,
@@ -980,7 +1100,7 @@ function nodeView(node) {
   }
   if (r.type === "comms") {
     const ms = (snap.messages || []).filter((m) => messageKey(m) === r.key);
-    if (!ms.length) return null;
+    if (!ms.length) return node.id.startsWith("win:") ? windowsView(node) : null;
     const lines = ms.slice(0, 5).map((m) => logLine("LOG", `${clock(m.at)} ${m.direction === "to_claude" ? "MAC → Claude" : "Claude → MAC"}${m.machine ? ` (${m.machine})` : ""}: `, md(clipText(m.text, 200))));
     return {
       src: "~/.vader-mac-runs/brain/comms.jsonl", lines,
@@ -996,6 +1116,22 @@ function nodeView(node) {
     };
   }
   return null;
+}
+
+// A Windows job MAC never messaged about: what windows-status.json and the heartbeat say about it.
+function windowsView(node) {
+  const key = node.ref.key, beat = snap.windows || {}, box = snap.windows_box || {};
+  const queued = (box.jobs || []).find((j) => j.name === key);
+  const remote = (snap.remote_jobs || []).find((j) => j.id === key);
+  const done = (beat.recent || []).find((j) => j.job === key);
+  const lines = [logLine("ST", queued ? queued.state : remote ? remote.lifecycle || remote.state : done ? "finished" : "seen on Windows")];
+  if (beat.job === key && beat.last_log_line) lines.push(logLine("LOG", `${beat.at ? `${clock(beat.at)} ` : ""}${plain(beat.last_log_line)}`));
+  else if (remote && remote.last_text) lines.push(logLine("LOG", plain(remote.last_text)));
+  if (done) lines.push(logLine("RPT", `${clock(done.finished_at)} `, md(clipText(done.first_line || "", 220))));
+  return {
+    src: "~/.vader-mac-runs/brain/windows-status.json", lines, fix: null,
+    more: ["Show on the timeline ▸", () => { closeNodePopup(); document.getElementById("running-panel").scrollIntoView({ behavior: "smooth", block: "start" }); }],
+  };
 }
 
 // VADER's node terminal: a small macOS-style window next to the node. Only NEEDS ANTHONY gets a fix request.
@@ -1119,64 +1255,88 @@ function renderAudit() {
 }
 
 // The WINDOWS box between the Death Stars: a short terminal list from windows-status.json.
-// A short terminal list under each Death Star: what is running, needs Anthony or waits, at most BOX_LINES
-// lines and a "+N more" line, then one summary line.
-const BOX_LINES = 5;
-const boxDots = (name, width = 18) => {
-  const n = name.length > width ? `${name.slice(0, width - 1)}…` : name;
-  return `${n} ${".".repeat(Math.max(2, width - n.length))}`;
-};
-const boxLine = (name, state, cls) => el("div", { class: "wb-line" },
-  el("span", { class: "wb-name" }, boxDots(name)), " ", el("span", { class: `wb-st wb-${cls}` }, state));
-function boxLines(items, empty) {
-  if (!items.length) return [el("div", { class: "wb-line wb-none" }, empty)];
-  const out = items.slice(0, BOX_LINES).map((i) => boxLine(i.name, i.state, i.cls));
-  const rest = items.slice(BOX_LINES);
-  if (rest.length) {
-    const words = [...new Set(rest.map((i) => i.state.toLowerCase()))].join(" or ");
-    out.push(el("div", { class: "wb-line wb-more" }, `+${rest.length} more ${words}`));
-  }
-  return out;
-}
-const STATE_WORD = { needs_anthony: ["NEEDS YOU", "needs"], in_progress: ["RUNNING", "running"], queued: ["QUEUED", "queued"] };
-const STATE_RANK = { needs_anthony: 0, in_progress: 1, queued: 2 };
+// Under each Death Star: cards for what is running or needs Anthony (status, name, a bar for how long it
+// has been in that state), the waiting queue as dots, then one summary line. Everything opens its job.
+const BOX_CARDS = 3;
+const QUEUE_DOTS = 12;
+const BAR_FULL_MIN = 90; // a full bar is 90 minutes
 
-function nodeBox(id, name, nodes, summary) {
-  const live = [];
+function openStationNode(id) {
+  const node = brains && brains.findNode(id);
+  if (!node) return;
+  document.querySelector(".hero").scrollIntoView({ behavior: "smooth", block: "start" });
+  openNodePopup(node);
+}
+
+function minutesSince(iso) {
+  const t = Date.parse(iso || "");
+  return Number.isNaN(t) ? null : Math.max(0, Math.round((Date.now() - t) / 60000));
+}
+const fmtMin = (m) => (m === null ? "" : m < 60 ? `${m} m` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} m`);
+
+function stationCard(n) {
+  const needs = n.action === "needs_anthony";
+  const min = minutesSince(n.since);
+  const bar = el("span", { class: "jc-bar", "aria-hidden": "true" }, el("span", { class: "jc-fill" }));
+  bar.firstChild.style.setProperty("width", `${Math.round(100 * Math.min(1, (min || 0) / BAR_FULL_MIN))}%`);
+  const time = min === null ? "" : needs ? `waiting ${fmtMin(min)}` : fmtMin(min);
+  return el("button", {
+    type: "button", class: `jc ${needs ? "jc-needs" : "jc-run"}`, title: `${n.label} · ${n.title || ""}`,
+    "aria-label": `${n.label}: ${needs ? "needs you" : "running"}${time ? `, ${time}` : ""}. Open it.`,
+    onclick: () => openStationNode(n.id),
+  },
+  el("span", { class: "jc-top" }, el("span", { class: `jc-pill ${needs ? "needs" : "run"}` }, needs ? "NEEDS YOU" : "RUNNING"),
+    el("span", { class: "jc-name" }, n.label)),
+  el("span", { class: "jc-bottom" }, bar, el("span", { class: "jc-time" }, time)));
+}
+
+function queueRow(nodes, word) {
+  if (!nodes.length) return el("div", { class: "jq jq-empty" }, `nothing ${word}`);
+  const dots = nodes.slice(0, QUEUE_DOTS).map((n) => el("button", {
+    type: "button", class: "jq-dot", title: `${n.label} · ${word}${n.title && n.title !== n.label ? ` · ${n.title}` : ""}`,
+    "aria-label": `${n.label}, ${word}. Open it.`, onclick: () => openStationNode(n.id),
+  }));
+  const more = nodes.length > QUEUE_DOTS ? el("span", { class: "jq-more" }, `+${nodes.length - QUEUE_DOTS}`) : null;
+  return el("div", { class: "jq" }, el("span", { class: "jq-k" }, `${nodes.length} ${word}`), el("span", { class: "jq-dots" }, dots, more));
+}
+
+function stationBox(id, name, nodes, queueWord, footer, extra) {
   const seen = new Set();
-  for (const n of nodes) {
-    if (!STATE_WORD[n.action] || seen.has(n.label)) continue;
+  const live = nodes.filter((n) => {
+    if (seen.has(n.label) || !["needs_anthony", "in_progress", "queued"].includes(n.action)) return false;
     seen.add(n.label);
-    live.push({ name: n.label, state: STATE_WORD[n.action][0], cls: STATE_WORD[n.action][1], rank: STATE_RANK[n.action] });
-  }
-  live.sort((a, b) => a.rank - b.rank);
-  const count = (a) => live.filter((x) => x.cls === a).length;
-  const head = [count("running") && `${count("running")} running`, count("needs") && `${count("needs")} need${count("needs") === 1 ? "s" : ""} you`].filter(Boolean).join(" · ") || "idle";
-  document.getElementById(id).replaceChildren(
-    el("div", { class: "wb-head" }, el("b", {}, name), ` · ${head}`), ...boxLines(live, "nothing in flight"),
-    el("div", { class: "wb-acc sb-sum" }, summary));
+    return true;
+  });
+  const hot = live.filter((n) => n.action !== "queued").sort((a, b) => (a.action === "needs_anthony" ? -1 : 0) - (b.action === "needs_anthony" ? -1 : 0));
+  const queued = live.filter((n) => n.action === "queued");
+  const running = hot.filter((n) => n.action === "in_progress").length, needs = hot.length - running;
+  const head = [running && `${running} running`, needs && `${needs} need${needs === 1 ? "s" : ""} you`].filter(Boolean).join(" · ") || "idle";
+  const cards = hot.slice(0, BOX_CARDS).map((n) => stationCard(n));
+  const moreHot = hot.length > BOX_CARDS
+    ? el("button", { type: "button", class: "jc-more", onclick: () => document.getElementById("running-panel").scrollIntoView({ behavior: "smooth" }) }, `+${hot.length - BOX_CARDS} more running · see the timeline`)
+    : null;
+  document.getElementById(id).replaceChildren(...[
+    el("div", { class: "wb-head" }, el("b", {}, name), ` · ${head}`),
+    ...(cards.length ? cards : [el("div", { class: "jq jq-empty" }, "nothing running")]), moreHot,
+    queueRow(queued, queueWord), footer, ...(extra || []),
+  ].filter(Boolean));
 }
 
 function renderStationBoxes() {
   const nodes = stationNodes();
   const done24 = allJobs().filter((j) => j.action === "done" && Date.now() - Date.parse(j.updated_at) < DAY).length;
   const blocked = nodes.claude.filter((n) => n.action === "needs_anthony").length;
-  nodeBox("claude-box", "CLAUDE", nodes.claude, `TODAY: ${done24} done · ${blocked} waiting on you`);
+  stationBox("claude-box", "CLAUDE", nodes.claude, "queued", el("div", { class: "wb-acc sb-sum" }, `TODAY: ${done24} done · ${blocked} waiting on you`));
   const orders = snap.inbox.filter((e) => e.action !== "done");
-  nodeBox("mac-box", "GROK BOT · MAC", nodes.mac,
-    `WORK ORDERS: ${orders.length} open · ${orders.filter((e) => e.action === "needs_anthony").length} waiting on you`);
-  renderWinBox();
+  stationBox("mac-box", "GROK BOT · MAC", nodes.mac, "queued",
+    el("div", { class: "wb-acc sb-sum" }, `WORK ORDERS: ${orders.length} open · ${orders.filter((e) => e.action === "needs_anthony").length} waiting on you`));
+  renderWinBox(nodes.windows);
 }
 
-function renderWinBox() {
+function renderWinBox(nodes) {
   const w = snap.windows_box || {};
   const box = document.getElementById("win-box");
   const when = w.updated_at ? new Date(w.updated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "never";
-  const jobs = [...(w.jobs || [])].sort((a, b) => (b.state === "RUNNING") - (a.state === "RUNNING"))
-    .map((j) => ({ name: j.name, state: j.state, cls: j.state.toLowerCase().replace(/\s+/g, "-") }));
-  const lines = w.offline
-    ? [el("div", { class: "wb-line wb-offline" }, "offline", el("span", { class: "wb-why" }, ` · ${w.reason}`))]
-    : boxLines(jobs, "no jobs");
   const acc = w.accepting || {};
   const accepting = el("div", { class: `wb-acc ${acc.known ? (acc.yes ? "yes" : "no") : "unknown"}` },
     "ACCEPTING JOBS: ", acc.known ? (acc.yes ? "yes" : `no${acc.reason ? ` — ${acc.reason}` : ""}`) : "unknown (not in windows-status.json yet)");
@@ -1187,7 +1347,13 @@ function renderWinBox() {
       el("ul", { class: "wb-rules" }, w.rules.map((r) => el("li", {}, r))))
     : null;
   box.className = `win-box${w.offline ? " is-offline" : ""}`;
-  box.replaceChildren(el("div", { class: "wb-head" }, el("b", {}, "WINDOWS"), ` · last update ${when}`), ...lines, accepting, rules || "");
+  if (w.offline) {
+    box.replaceChildren(el("div", { class: "wb-head" }, el("b", {}, "WINDOWS"), ` · last update ${when}`),
+      el("div", { class: "wb-line wb-offline" }, "offline", el("span", { class: "wb-why" }, ` · ${w.reason}`)), accepting, rules || "");
+  } else {
+    stationBox("win-box", "WINDOWS", nodes || [], "ready", accepting, rules ? [rules] : []);
+    box.querySelector(".wb-head").append(` · ${when}`);
+  }
   placeWinBox();
 }
 

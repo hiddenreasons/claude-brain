@@ -23,7 +23,10 @@ from .flow import failure_signature
 
 FALSE_ALERT_MIN = 15
 LESSON_STATUSES = ("proposed", "approved", "declined")
-LESSON_LINE_RE = re.compile(r"^###\s+(L-[0-9a-f]{6})\b.*?$|^-\s*\*\*Status:\*\*\s*(\w+)(.*)$", re.M)
+LESSON_LINE_RE = re.compile(
+    r"^###\s+(L-[0-9a-f]{6})\b.*?$|^-\s*\*\*Status:\*\*\s*(\w+)(.*)$|^-\s*\*\*Fix:\*\*\s*(.*)$", re.M
+)
+NO_FIX = "(not written yet: Anthony or MAC, write the fix here)"
 
 
 def lesson_id(key: str) -> str:
@@ -143,7 +146,11 @@ def read_lesson_statuses(text: Optional[str]) -> Dict[str, Dict[str, str]]:
         if m.group(1):
             current = m.group(1)
         elif current and m.group(2) and m.group(2).lower() in LESSON_STATUSES:
-            out[current] = {"status": m.group(2).lower(), "note": m.group(3).strip(" -—:")}
+            out.setdefault(current, {"status": "proposed", "note": "", "fix": ""})
+            out[current].update(status=m.group(2).lower(), note=m.group(3).strip(" -—:"))
+        elif current and m.group(4) is not None:
+            fix = m.group(4).strip()
+            out.setdefault(current, {"status": "proposed", "note": "", "fix": ""})["fix"] = "" if fix == NO_FIX else fix
     return out
 
 
@@ -153,7 +160,9 @@ def lessons_page(lessons: List[Dict[str, Any]]) -> str:
         "",
         "Drafted by Claude Brain from repeated failures and false alerts. Drafts only: nothing changes until",
         "Anthony or MAC changes a **Status:** line to `approved` (or `declined`). An approved lesson changes",
-        "only the Brain's own alerting. MAC: copy approved lessons into ~/.vader-mac-runs/LESSONS.md.",
+        "only the Brain's own alerting; a known-issue lesson shows its **Fix:** line (edit it) instead of a fresh",
+        "alert. A declined failure lesson stops counting that failure. MAC: copy approved lessons into",
+        "~/.vader-mac-runs/LESSONS.md.",
         "",
     ]
     for lesson in lessons:
@@ -162,6 +171,7 @@ def lessons_page(lessons: List[Dict[str, Any]]) -> str:
             "",
             f"- **Evidence:** {lesson.get('evidence')}",
             f"- **Draft rule:** {lesson.get('draft')}",
+            f"- **Fix:** {lesson.get('fix') or NO_FIX}",
             f"- **Status:** {lesson['status']}{(' ' + lesson['note']) if lesson.get('note') else ''}",
             f"- **First proposed:** {lesson.get('at')}",
             "",
@@ -173,14 +183,28 @@ def lessons_page(lessons: List[Dict[str, Any]]) -> str:
 
 
 def apply_approved(snapshot: Dict[str, Any], approved: List[Dict[str, Any]]) -> None:
-    """Known-issue lessons label matching blocked jobs. (Grace lessons are applied by the Recorder.)"""
+    """Known-issue lessons: a matching blocked job is labelled with the lesson's fix and handed to MAC.
+    (The Recorder turns its alert into a known-issue note; grace lessons are applied there too.)"""
     known = {lesson["signature"]: lesson for lesson in approved if lesson.get("effect") == "known-issue"}
     if not known:
         return
     for job in snapshot.get("folders", []) + snapshot.get("oneshots", []):
         sig = failure_signature(job.get("report_headline") or job.get("note"))
         if sig in known and job.get("lifecycle") in ("blocked", "stalled"):
-            job["known_issue"] = f"{known[sig]['id']}: {known[sig]['draft']}"
+            lesson = known[sig]
+            job["known_issue"] = {"id": lesson["id"], "fix": lesson.get("fix") or lesson["draft"]}
+            job["up_next"] = "MAC"
+
+
+def drop_declined_failures(snapshot: Dict[str, Any], declined: List[Dict[str, Any]]) -> None:
+    """A declined failure lesson says that signature is not a failure (e.g. danger_guard holds are
+    Anthony's review gate): it stops showing as a repeated failure, so no recommendation is drawn from it."""
+    sigs = {lesson.get("signature") for lesson in declined if lesson.get("kind") == "failure"}
+    flow = snapshot.get("flow") or {}
+    if sigs and flow.get("findings"):
+        flow["findings"] = [
+            f for f in flow["findings"] if not (f.get("kind") == "repeated-failure" and f.get("signature") in sigs)
+        ]
 
 
 def held_by_grace(

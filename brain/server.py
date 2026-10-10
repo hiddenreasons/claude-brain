@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlsplit
 
+from . import timeline
 from .brainfiles import BrainFiles
 from .codex import codex_messages
 from .comms import merge
@@ -93,6 +94,7 @@ class BrainState:
             iso(time.time()),
             initial=self.version == 0,
         )
+        snapshot["timeline"] = timeline.build(snapshot, snapshot["messages"], time.time())
         snapshot["running_count"] += len(remote_running)
         snapshot["comms"] = {"events": len(comms), "skipped": skipped, "running": remote_running}
         # One alert per job state, clears, decisions and bugs go to the Brain's own audit trail.

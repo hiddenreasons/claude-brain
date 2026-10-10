@@ -16,6 +16,7 @@ from .advisor import Advisor, sample_flow
 from .brainfiles import BrainFiles, Ledger, audit
 from .learning import (
     apply_approved,
+    drop_declined_failures,
     held_by_grace,
     lesson_id,
     lessons_page,
@@ -74,9 +75,40 @@ class Recorder:
         counts = {"alerts": 0, "clears": 0, "decisions": 0, "bugs": 0}
         jobs = {f"{j['kind']}:{j['id']}": j for j in snapshot.get("folders", []) + snapshot.get("oneshots", [])}
         alert_log = {r.get("key"): r for r in self.files.records("alerts.jsonl")}
-        # Approved lessons only (drafts change nothing): known-issue notes, and holds on self-clearing alerts.
-        approved = [lesson for lesson in self._lessons() if lesson["status"] == "approved"]
+        # Approved lessons only (drafts change nothing): known issues go to MAC with the fix instead of a fresh
+        # alert, and alerts that keep clearing themselves are held. A declined failure lesson means "not a
+        # failure": that signature stops counting as a repeated failure.
+        lessons = self._lessons()
+        approved = [lesson for lesson in lessons if lesson["status"] == "approved"]
         apply_approved(snapshot, approved)
+        drop_declined_failures(snapshot, [lesson for lesson in lessons if lesson["status"] == "declined"])
+        known, fresh = [], []
+        for item in snapshot.get("attention", []):
+            job = jobs.get(f"{item.get('kind')}:{item['id']}", {})
+            (known if job.get("known_issue") else fresh).append(item)
+        snapshot["attention"] = fresh
+        for item in known:
+            job = jobs[f"{item['kind']}:{item['id']}"]
+            lid = job["known_issue"]["id"]
+            self._once(
+                f"known:{alert_key(item, jobs)}",
+                "known-issue",
+                item["id"],
+                f"known issue {lid}, not alerted: {job['known_issue']['fix']}"[:300],
+                "Brain -> MAC",
+            )
+            snapshot.setdefault("mac_attention", []).append(
+                {
+                    "source": "known-issue",
+                    "id": item["id"],
+                    "state": "known issue",
+                    "title": f"{item['id']}: known issue {lid}",
+                    "detail": f"Fix: {job['known_issue']['fix']}",
+                    "machine": job.get("machine") or "MAC",
+                    "at": job.get("report_at"),
+                    "up_next": "MAC",
+                }
+            )
         for item in snapshot.get("attention", []):
             key = alert_key(item, jobs)
             source_job = jobs.get(f"{item.get('kind')}:{item['id']}", {})
@@ -98,6 +130,8 @@ class Recorder:
             item["alert_key"] = key
             item["first_alerted_at"] = (alert_log.get(key) or {}).get("at")
         for item in snapshot.get("mac_attention", []):
+            if item["source"] == "known-issue":
+                continue  # recorded once above as a known issue, never a fresh alert
             key = f"mac:{item['source']}:{item['id']}|{item['state']}|{item.get('at') or ''}"
             if self.alerts.add(key, {"job": item["id"], "state": item["state"], "title": item["title"], "for": "MAC"}):
                 audit(

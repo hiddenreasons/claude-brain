@@ -146,3 +146,15 @@ def test_accepting_jobs_and_the_rules_are_shown(tree):
     assert read_windows_status(tree.runs_dir, time.time())["accepting"]["yes"] is True
     status_file(tree, copied_at=iso(time.time() - 60))
     assert read_windows_status(tree.runs_dir, time.time())["accepting"]["known"] is False
+
+
+def test_a_raw_stream_line_from_the_heartbeat_reads_as_plain_words():
+    from brain.machines import readable_log_line
+
+    cut = '{"type":"assistant","message":{"model":"claude-opus-5-5","content":[{"type":"thinking","thinking":"","sig'
+    assert readable_log_line(cut) == "thinking"
+    tool = '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"x","descr'
+    assert readable_log_line(tool) == "calling Bash"
+    assert readable_log_line('{"type":"user","message":{"content":[{"type":"tool_result"') == "reading a tool result"
+    assert readable_log_line("Running tests (12/40)") == "Running tests (12/40)"
+    assert readable_log_line(None) is None

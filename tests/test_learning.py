@@ -92,7 +92,7 @@ def test_an_approved_known_issue_lesson_labels_matching_blocked_jobs(tree):
     set_status(tree, lid, "approved")
     snapshot = record(tree, files)
     blocked = [j for j in snapshot["folders"] if j["id"] in ("alpha", "bravo")]
-    assert blocked and all(j.get("known_issue", "").startswith(lid) for j in blocked)
+    assert blocked and all((j.get("known_issue") or {}).get("id") == lid for j in blocked)
     trail = [r for r in files.records("audit.jsonl") if r["event"] == "lesson" and r["job"] == lid]
     assert len(trail) == 1 and trail[0]["change"].startswith("approved")
     record(tree, files)
@@ -205,3 +205,80 @@ def test_history_is_append_only_and_stays_in_the_brains_folder(tree):
         assert all(json.loads(line) for line in now)
     new = {p for p in tree.runs_dir.rglob("*") if p.is_file()} - before
     assert new and all(p.parent == tree.brain_dir for p in new)
+
+
+# ---------- MAC's decisions on L-7a0ad8 (approved) and L-81b2ab (declined), 2026-10-09 ----------
+
+PRECOMMIT = "TO MAC: BLOCKED pre-commit sandbox-only: work done and STAGED on claude/x\n"
+GUARD = "TO MAC: BLOCKED danger_guard (5 files staged; needs the owner's --review)\n"
+MAC_FIX = "job stages work + COMMIT_MSG.txt; MAC commits outside the sandbox with hooks ON"
+
+
+def decide(tree, lid, status_line, fix=None):
+    """Edit the page the way MAC did: the Status line, and optionally the Fix line."""
+    page = tree.brain_dir / "PROPOSED-LESSONS.md"
+    text = page.read_text()
+    head = text.index(f"### {lid}")
+    end = text.find("\n### ", head + 1)
+    end = len(text) if end < 0 else end
+    block = text[head:end].replace("- **Status:** proposed", f"- **Status:** {status_line}")
+    if fix:
+        block = block.replace(f"- **Fix:** {learning.NO_FIX}", f"- **Fix:** {fix}")
+    page.write_text(text[:head] + block + text[end:])
+
+
+def test_macs_exact_status_lines_are_read():
+    page = (
+        "### L-7a0ad8 · failure · x\n\n- **Fix:** " + MAC_FIX + "\n"
+        "- **Status:** approved (Anthony + MAC 2026-10-09 20:58 ET)\n\n"
+        "### L-81b2ab · failure · y\n\n- **Fix:** " + learning.NO_FIX + "\n"
+        "- **Status:** declined (Anthony + MAC 2026-10-09 20:58 ET: danger_guard holds are the owner review gate, "
+        "not a failure)\n"
+    )
+    got = learning.read_lesson_statuses(page)
+    assert got["L-7a0ad8"] == {"status": "approved", "note": "(Anthony + MAC 2026-10-09 20:58 ET)", "fix": MAC_FIX}
+    assert got["L-81b2ab"]["status"] == "declined" and got["L-81b2ab"]["fix"] == ""
+
+
+def test_an_approved_known_issue_goes_to_mac_with_the_fix_not_as_a_fresh_alert(tree):
+    for name in ("alpha", "bravo"):
+        finished_job(tree.runs_dir, name, PRECOMMIT)
+    files = BrainFiles(tree.brain_dir)
+    record(tree, files)
+    lid = learning.lesson_id("failure:pre-commit hook in the sandbox")
+    assert len(alerts_for(files, "alpha")) == 1  # before approval: alerted as usual
+    decide(tree, lid, "approved (Anthony + MAC 2026-10-09 20:58 ET)", MAC_FIX)
+    finished_job(tree.runs_dir, "charlie", PRECOMMIT, age_s=120)  # a new job hits the same block
+    for _ in range(3):
+        snapshot = build_snapshot(tree, FileCache())
+        Recorder(files).record(snapshot)
+    assert alerts_for(files, "charlie") == []
+    assert not any(a["id"] == "charlie" for a in snapshot["attention"])
+    note = next(a for a in snapshot["mac_attention"] if a["id"] == "charlie")
+    assert note["source"] == "known-issue" and note["detail"] == f"Fix: {MAC_FIX}" and note["up_next"] == "MAC"
+    job = next(j for j in snapshot["folders"] if j["id"] == "charlie")
+    assert job["known_issue"] == {"id": lid, "fix": MAC_FIX} and job["up_next"] == "MAC"
+    trail = [r for r in files.records("audit.jsonl") if r["event"] == "known-issue" and r["job"] == "charlie"]
+    assert len(trail) == 1  # recorded once, not every refresh
+    assert f"- **Fix:** {MAC_FIX}" in (tree.brain_dir / "PROPOSED-LESSONS.md").read_text()  # MAC's edit kept
+
+
+def test_a_declined_failure_lesson_stops_counting_it_and_holds_stay_waiting_on_anthony(tree):
+    for name in ("alpha", "bravo"):
+        finished_job(tree.runs_dir, name, GUARD)
+    files = BrainFiles(tree.brain_dir)
+    snapshot = record(tree, files)
+    sig_key = "repeated-failure:danger_guard hold"
+    assert sig_key in [f["key"] for f in snapshot["flow"]["findings"]]
+    lid = learning.lesson_id("failure:danger_guard hold")
+    decide(tree, lid, "declined (Anthony + MAC 2026-10-09 20:58 ET: the owner review gate, not a failure)")
+    recs_before = len(files.records("recommendations.jsonl"))
+    finished_job(tree.runs_dir, "charlie", GUARD, age_s=120)
+    snapshot = build_snapshot(tree, FileCache())
+    Recorder(files).record(snapshot)
+    assert sig_key not in [f["key"] for f in snapshot["flow"]["findings"]]
+    assert len(files.records("recommendations.jsonl")) == recs_before
+    assert len([r for r in files.records("lessons.jsonl") if r["id"] == lid]) == 1  # not proposed again
+    job = next(j for j in snapshot["folders"] if j["id"] == "charlie")
+    assert job["up_next"] == "Anthony" and not job.get("known_issue")
+    assert any(a["id"] == "charlie" for a in snapshot["attention"])  # still shown as waiting on Anthony

@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from .readers import iso, read_text
+from .mac_runs import parse_activity
+from .readers import clip, iso, read_text
 
 FRESH_S = 12 * 60  # MAC copies the Windows heartbeat about every 10 min; 12 allows for one late copy
 STALE_S = 15 * 60
@@ -63,6 +64,35 @@ def _load(path: Path) -> Any:
         return ValueError
 
 
+_TOOL_RE = re.compile(r'"type"\s*:\s*"tool_use".*?"name"\s*:\s*"([^"]+)"')
+_TEXT_RE = re.compile(r'"type"\s*:\s*"text"\s*,\s*"text"\s*:\s*"((?:[^"\\]|\\.){1,200})')
+
+
+def readable_log_line(line: Optional[str]) -> Optional[str]:
+    """Windows' heartbeat sends the raw last line of the Claude stream (JSON, often cut short). Say what it
+    shows in plain words: the tool it called, what it wrote, or that it is thinking or reading a result."""
+    if not line or not str(line).lstrip().startswith("{"):
+        return line
+    line = str(line)
+    acts = parse_activity(line, limit=1)["actions"]
+    if acts:
+        a = acts[-1]
+        return f"{a['name']}: {a['summary']}" if a["kind"] == "tool" else a["text"]
+    tool = _TOOL_RE.search(line)
+    if tool:
+        return f"calling {tool.group(1)}"
+    text = _TEXT_RE.search(line)
+    if text:
+        return clip(text.group(1).replace("\\n", " "), 200)
+    if '"thinking"' in line:
+        return "thinking"
+    if '"tool_result"' in line or '"type":"user"' in line:
+        return "reading a tool result"
+    if '"type":"result"' in line:
+        return "finished this iteration"
+    return "working (log line not readable)"
+
+
 def read_heartbeat(runs_dir: Path, now: float) -> Dict[str, Any]:
     path = heartbeat_path(runs_dir)
     out: Dict[str, Any] = {
@@ -108,7 +138,7 @@ def read_heartbeat(runs_dir: Path, now: float) -> Dict[str, Any]:
             "stale": age is None or age > STALE_S,
             "job": (str(beat.get("job") or beat.get("current_job") or "").strip() or None),
             "job_state": state,
-            "last_log_line": beat.get("last_log_line"),
+            "last_log_line": readable_log_line(beat.get("last_log_line")),
             "error": beat.get("error") or None,
             "machine_up": beat.get("machine_up"),
             "running_jobs": [str(j) for j in beat.get("running_jobs") or [] if isinstance(j, str)],
@@ -206,7 +236,7 @@ def remote_jobs(
                         "source": "Windows heartbeat",
                         "started_at": None,
                         "last_at": beat.get("at"),
-                        "last_text": beat.get("last_log_line"),
+                        "last_text": readable_log_line(beat.get("last_log_line")),
                     }
                 )
     return out
