@@ -251,13 +251,20 @@ function withAsk(card, askBtn) {
 // ---------- Anthony's "Mark done" ----------
 // For a job he knows finished but the Brain doesn't show as completed. The Brain records the mark in its own
 // folder (never touches the job), then verifies it: proof found = VERIFIED; none = UNVERIFIED and MAC confirms.
-async function sendMark(kind, id, action, btn) {
+// What the page is showing for a job, in the server's terms (marks.snapshot_of): a mark covers only that.
+function shownAs(kind, item) {
+  const seen = kind === "folder" ? item.report_at || item.stream_updated_at || item.updated_at
+    : kind === "oneshot" ? item.updated_at : item.last_at;
+  return { state: item.state, seen: seen || null };
+}
+
+async function sendMark(kind, id, action, btn, shown) {
   if (btn) { btn.disabled = true; btn.textContent = action === "done" ? "Marking…" : "Undoing…"; }
   try {
     const res = await fetch("/api/mark", {
       method: "POST", cache: "no-store",
       headers: { "Content-Type": "application/json", "X-Brain-Action": "mark" },
-      body: JSON.stringify({ kind, id, action }),
+      body: JSON.stringify({ kind, id, action, ...(shown || {}) }),
     });
     if (!res.ok) {
       let why = res.statusText;
@@ -297,7 +304,7 @@ function markControl(kind, id, item) {
         return;
       }
       clearTimeout(armed);
-      sendMark(kind, id, "done", btn);
+      sendMark(kind, id, "done", btn, shownAs(kind, item));
     },
   }, "✔ Mark done");
   const lapsed = item.owner_mark_lapsed

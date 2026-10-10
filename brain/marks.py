@@ -5,32 +5,35 @@ never a change to the job, its folder or MAC's files. Each mark remembers what t
 clicked (its state and its last report time): if the job changes after that (MAC re-runs it, a new report
 lands), the mark lapses and the job shows as it really is again.
 
-A mark is VERIFIED only by proof the Brain can check: STATUS.md or git already resolving the job, a Windows
-DONE report, or a commit named in the job's report that git confirms exists. Words in a BLOCKED report
-(a file path, "40 passed") are not proof. Unverified marks leave Anthony's list and go to MAC to confirm.
+A mark is VERIFIED only by proof the Brain can check: the Brain's own proof from before the mark (a DONE
+report with a commit, test result or file), STATUS.md or git already resolving the job, or a Windows DONE
+report. Nothing in a BLOCKED or FAILED report counts, not even a real commit (it may be the base the job
+started from). Unverified marks leave Anthony's list and go to MAC to confirm.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import gitread
-from .foundation import COMMIT_RE, PROOF_SOURCES, _job_texts
+from .foundation import PROOF_SOURCES
 from .readers import read_text
 
 MARKS_FILE = "owner-marks.jsonl"
 KINDS = ("folder", "oneshot", "remote")
 ACTIONS = ("done", "undo")
 MARKABLE = ("blocked", "stalled")  # plus "done" that the Brain couldn't verify
-SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
 def snapshot_of(kind: str, job: Dict[str, Any]) -> Dict[str, Any]:
     """What the job looked like when it was marked: the mark holds only while this is unchanged."""
-    seen = {"folder": job.get("report_at"), "oneshot": job.get("updated_at"), "remote": job.get("last_at")}[kind]
+    seen = {
+        # a stalled job may have no report: its log moving is the change to watch for
+        "folder": job.get("report_at") or job.get("stream_updated_at") or job.get("updated_at"),
+        "oneshot": job.get("updated_at"),
+        "remote": job.get("last_at"),
+    }[kind]
     return {"state": job.get("state"), "seen": seen}
 
 
@@ -52,13 +55,7 @@ def read_marks(brain_dir: Path) -> Dict[str, Dict[str, Any]]:
     return {k: r for k, r in latest.items() if r["action"] == "done"}
 
 
-def _commit_exists(sha: str, repos: List[Path]) -> bool:
-    if not SHA_RE.match(sha):
-        return False
-    return any(gitread.git(repo, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}") for repo in repos)
-
-
-def proof_for(job: Dict[str, Any], windows_recent: List[Dict[str, Any]], repos: List[Path]) -> Optional[Dict[str, str]]:
+def proof_for(job: Dict[str, Any], windows_recent: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
     if job.get("proof") and job.get("lifecycle_was") in ("done", "resolved"):
         return job["proof"]  # the Brain's own check had already found it
     followed = str(job.get("followed_up_by") or "")
@@ -67,15 +64,10 @@ def proof_for(job: Dict[str, Any], windows_recent: List[Dict[str, Any]], repos: 
     for r in windows_recent:
         if r.get("job") == job.get("id") and str(r.get("first_line") or "").startswith("TO MAC: DONE"):
             return {"kind": "report", "text": f"windows-status.json: {r['first_line'][:60]}"}
-    texts = "\n".join(t for t in (*_job_texts(job), job.get("note"), job.get("last_text")) if t)
-    job_repos = ([Path(job["path"]) / "wt"] if job.get("path") else []) + repos
-    for m in COMMIT_RE.finditer(texts):
-        if _commit_exists(m.group(1), job_repos):
-            return {"kind": "commit", "text": f"{m.group(1)[:12]} (in git)"}
     return None
 
 
-def apply(snapshot: Dict[str, Any], marks: Dict[str, Dict[str, Any]], repos: List[Path]) -> List[Dict[str, Any]]:
+def apply(snapshot: Dict[str, Any], marks: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Label marked jobs, verify them, and take them off Anthony's list. Returns MAC's confirm items."""
     recent = (snapshot.get("windows") or {}).get("recent") or []
     groups = {
@@ -95,7 +87,7 @@ def apply(snapshot: Dict[str, Any], marks: Dict[str, Dict[str, Any]], repos: Lis
                 continue
             marked.add((kind, job["id"]))
             job["lifecycle_was"] = job.get("lifecycle")
-            proof = proof_for(job, recent, repos)
+            proof = proof_for(job, recent)
             job["owner_mark"] = {"at": mark.get("at"), "verified": bool(proof), "proof": proof}
             job["lifecycle"] = "done"
             job["lifecycle_why"] = "marked done by Anthony" + ("" if proof else "; no proof found yet")

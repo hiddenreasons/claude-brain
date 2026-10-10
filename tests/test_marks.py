@@ -42,7 +42,7 @@ def mark(tree, kind, job_id, action="done"):
         fh.write(json.dumps(record) + "\n")
 
 
-def commit_in(repo):
+def commit_in(repo, age_s=0):
     env = {
         **os.environ,
         "GIT_AUTHOR_NAME": "t",
@@ -50,6 +50,11 @@ def commit_in(repo):
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@t",
     }
+    if age_s:
+        import time
+
+        when = f"@{int(time.time() - age_s)} +0000"
+        env.update({"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
     repo.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
     (repo / "a.txt").write_text("a")
@@ -77,14 +82,28 @@ def test_a_mark_without_proof_is_unverified_and_goes_to_mac_not_anthony(tree):
     assert any(a["id"] == "quiet" and a["source"] == "owner-mark" for a in snap["mac_attention"])
 
 
-def test_a_mark_is_verified_by_a_commit_that_git_confirms(tree):
-    sha = commit_in(tree.runs_dir / "shipped" / "wt")
-    stuck(tree.runs_dir, "shipped", f"TO MAC: BLOCKED danger_guard; committed {sha[:10]} on claude/x\n")
-    mark(tree, "folder", "shipped")
-    snap = build_snapshot(tree, FileCache())
-    j = job(snap, "shipped")
-    assert j["owner_mark"]["verified"] is True and j["proof"]["text"].startswith(sha[:10]) and j["up_next"] is None
-    assert not any(a["id"] == "shipped" for a in snap["mac_attention"])
+def test_a_real_commit_named_in_a_blocked_report_is_still_not_proof(tree):
+    """The reviewer's case: the base commit the job started from exists in git, but the job didn't finish."""
+    sha = commit_in(tree.runs_dir / "based" / "wt", age_s=3 * HOUR)  # the base, from before the report
+    stuck(tree.runs_dir, "based", f"TO MAC: BLOCKED tests fail on main tip {sha[:10]}; nothing committed\n")
+    mark(tree, "folder", "based")
+    j = job(build_snapshot(tree, FileCache()), "based")
+    assert j["owner_mark"]["verified"] is False and j["up_next"] == "MAC"
+
+
+def test_a_mark_is_verified_when_status_md_or_git_already_resolved_it():
+    for followed in ("STATUS.md: wo012 DONE 13:02", "git: abc1234 merged into main"):
+        snap = {
+            "folders": [
+                {"id": "x", "state": "cleared", "lifecycle": "blocked", "report_at": "r", "followed_up_by": followed}
+            ],
+            "oneshots": [],
+            "remote_jobs": [],
+            "windows": {},
+            "attention": [],
+        }
+        assert marks.apply(snap, {"folder:x": {"action": "done", "state": "cleared", "seen": "r"}}) == []
+        assert snap["folders"][0]["owner_mark"]["verified"] is True
 
 
 def test_words_in_a_blocked_report_are_not_proof(tree):
@@ -105,6 +124,19 @@ def test_a_mark_lapses_when_the_job_changes_after_it(tree):
     assert "owner_mark" not in j and j["owner_mark_lapsed"] and any(a["id"] == "rerun" for a in snap["attention"])
 
 
+def test_a_stalled_job_with_no_report_lapses_when_its_log_moves(tree):
+    job_dir = tree.runs_dir / "silent"
+    write(job_dir / "brief.md", "JOB: silent (A-006, Opus high)\n", age_s=3 * HOUR)
+    write(job_dir / "runs.log", RUNLOG, age_s=3 * HOUR)
+    write(job_dir / "iter-1.jsonl", "{}\n", age_s=3 * HOUR)
+    write(job_dir / "iter-1.done", "", age_s=3 * HOUR)
+    mark(tree, "folder", "silent")
+    assert job(build_snapshot(tree, FileCache()), "silent").get("owner_mark")
+    write(job_dir / "iter-2.jsonl", "{}\n")  # MAC re-ran it
+    j = job(build_snapshot(tree, FileCache()), "silent")
+    assert "owner_mark" not in j and j.get("owner_mark_lapsed")
+
+
 def test_the_waiting_on_anthony_count_drops_when_he_marks_a_job(tree):
     stuck(tree.runs_dir, "needsme", "TO MAC: BLOCKED needs the owner's approval (danger_guard)\n")
     before = build_snapshot(tree, FileCache())["foundation"]["mine"]
@@ -120,7 +152,7 @@ def test_a_mark_on_a_folder_never_hides_a_oneshot_with_the_same_id():
         "windows": {},
         "attention": [{"source": "job", "kind": "folder", "id": "7"}, {"source": "job", "kind": "oneshot", "id": "7"}],
     }
-    marks.apply(snap, {"folder:7": {"action": "done", "state": "blocked", "seen": "r"}}, [])
+    marks.apply(snap, {"folder:7": {"action": "done", "state": "blocked", "seen": "r"}})
     assert snap["attention"] == [{"source": "job", "kind": "oneshot", "id": "7"}]
 
 
@@ -141,7 +173,7 @@ def test_a_windows_job_is_verified_by_its_done_report():
         "remote_jobs": [{"id": "sbatch01", "machine": "WINDOWS", "lifecycle": "running"}],
         "windows": {"recent": [{"job": "sbatch01", "first_line": "TO MAC: DONE"}]},
     }
-    assert marks.apply(snap, {"remote:sbatch01": {"action": "done", "state": None, "seen": None}}, []) == []
+    assert marks.apply(snap, {"remote:sbatch01": {"action": "done", "state": None, "seen": None}}) == []
     assert snap["remote_jobs"][0]["owner_mark"]["proof"]["kind"] == "report"
 
 
@@ -161,7 +193,9 @@ def post(port, body, origin=True, header=True, ctype="application/json"):
 
 def test_the_mark_endpoint_takes_only_the_pages_own_requests(server):  # noqa: F811
     cfg, port = server
-    good = {"kind": "oneshot", "id": "7", "action": "done"}
+    shown = next(o for o in json.loads(get(port, "/api/snapshot")[1])["oneshots"] if o["id"] == "7")
+    good = {"kind": "oneshot", "id": "7", "action": "done", "state": shown["state"], "seen": shown["updated_at"]}
+    assert post(port, {**good, "seen": "2000-01-01T00:00:00+00:00"})[0] == 409  # it changed since the page drew it
     assert post(port, good, header=False)[0] == 403
     assert post(port, good, origin="http://evil.example")[0] == 403
     assert post(port, good, origin=False)[0] == 403

@@ -315,6 +315,10 @@ def make_handler(state: BrainState):
                 if target is None:
                     self._error(HTTPStatus.CONFLICT, "only a blocked, stalled or unverified job can be marked done")
                     return
+                # The mark covers what Anthony was looking at: if a new report landed since, he checks it first.
+                if body.get("seen") != target["seen"] or body.get("state") != target["state"]:
+                    self._error(HTTPStatus.CONFLICT, "the job changed since the page showed it; look again")
+                    return
                 entry = {"kind": kind, "id": job_id, "action": "done", "who": "Anthony", **target}
             else:
                 # An undo works even after the job has left the page, so a mark can always be taken back.

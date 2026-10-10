@@ -273,7 +273,7 @@ def build_snapshot(cfg: Config, cache: FileCache, now: Optional[float] = None) -
     # One lifecycle, proof, who's up next and drift for every item; then the self-check line.
     snapshot["foundation"] = foundation.apply(snapshot, comms)
     # Anthony's "Mark done" (the Brain's own records): verified with proof, or sent to MAC to confirm.
-    owner_confirms = marks.apply(snapshot, marks.read_marks(cfg.brain_dir), [cfg.vader_dir])
+    owner_confirms = marks.apply(snapshot, marks.read_marks(cfg.brain_dir))
     snapshot["foundation"].update(foundation.counts(snapshot))
     for job in folders:
         job.pop("report_head", None)
