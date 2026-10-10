@@ -213,11 +213,14 @@ def test_the_self_check_goes_red_on_a_stale_heartbeat(tree):
     sc = build_snapshot(tree, FileCache())["selfcheck"]
     beat = next(c for c in sc["checks"] if c["name"].startswith("Windows heartbeat"))
     assert sc["ok"] is False and beat["ok"] is False and "20 min old" in beat["detail"]
-    assert "Windows heartbeat under 3 min" in sc["line"]
+    assert "Windows heartbeat under 12 min" in sc["line"]
 
 
 def test_the_self_check_is_green_when_everything_is_in_order(tree):
-    write(tree.runs_dir / "_xfer" / "win" / "heartbeat.json", json.dumps({"at": iso(time.time() - 30), "job": None}))
+    # MAC copies the heartbeat about every 10 minutes, so an 8-minute-old copy is still fresh.
+    write(
+        tree.runs_dir / "_xfer" / "win" / "heartbeat.json", json.dumps({"at": iso(time.time() - 8 * 60), "job": None})
+    )
     sc = build_snapshot(tree, FileCache())["selfcheck"]
     assert sc["ok"] is True and sc["line"] == "All checks pass", sc["line"]
 

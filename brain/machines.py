@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from .readers import iso, read_text
 
-FRESH_S = 3 * 60  # the self-check wants a heartbeat under 3 minutes old
+FRESH_S = 12 * 60  # MAC copies the Windows heartbeat about every 10 min; 12 allows for one late copy
 STALE_S = 15 * 60
 EASTERN = ZoneInfo("America/New_York")
 RUNNING_WORDS = {"running", "busy", "working", "started", "in-progress"}

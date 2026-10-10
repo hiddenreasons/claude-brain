@@ -1,6 +1,6 @@
 """Self-check on every load: one green or red line at the top of the page.
 
-STATUS.md readable, Windows heartbeat under 3 minutes old, no stale locks, no unfilled placeholders.
+STATUS.md readable, Windows heartbeat under 12 minutes old, no stale locks, no unfilled placeholders.
 Read-only: it looks at files, never touches them.
 """
 
@@ -10,6 +10,8 @@ import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+
+from .machines import FRESH_S
 
 STALE_LOCK_S = 10 * 60
 
@@ -91,7 +93,7 @@ def run(snapshot: Dict[str, Any], status_path: Path, runs_dir: Path, now: float 
     beat = snapshot.get("windows") or {}
     checks.append(
         {
-            "name": "Windows heartbeat under 3 min",
+            "name": f"Windows heartbeat under {FRESH_S // 60} min",
             "ok": bool(beat.get("fresh")),
             "detail": beat.get("reason") or "no heartbeat",
         }
