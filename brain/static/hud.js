@@ -79,7 +79,7 @@ function codeStream(jobs) {
         : streamLine(k, "cs-said", el("span", { class: "cs-comment" }, `# ${a.text || ""}`)));
     }
     if (!(j.activity || []).length) lines.push(streamLine(`w:${j.id}`, "cs-said", el("span", { class: "cs-comment" }, j.kind === "oneshot" ? "# waiting for the result" : "# starting…")));
-    blocks.push(el("button", { type: "button", class: "cs-block", "data-key": `cs:${j.id}`, title: `${j.id}: open the job`, onclick: () => openDetail(j.kind, j.id, j.title) }, ...lines));
+    blocks.push(el("button", { type: "button", class: "cs-block", "data-key": `cs:${j.kind}:${j.id}`, title: `${j.id}: open the job`, onclick: () => openDetail(j.kind, j.id, j.title) }, ...lines));
   }
   const beat = snap.windows || {};
   if (beat.fresh && beat.job) {
@@ -90,7 +90,7 @@ function codeStream(jobs) {
   if (!blocks.length) {
     const last = jobs.find((j) => ["done", "resolved", "blocked", "stalled"].includes(j.lifecycle));
     if (last) {
-      blocks.push(el("button", { type: "button", class: "cs-block cs-past", "data-key": `cs:${last.id}`, onclick: () => openDetail(last.kind, last.id, last.title) },
+      blocks.push(el("button", { type: "button", class: "cs-block cs-past", "data-key": `cs:${last.kind}:${last.id}`, onclick: () => openDetail(last.kind, last.id, last.title) },
         streamLine(`last:${last.id}`, "cs-prompt", ...prompt("claude@mac", last.id, "last run")),
         streamLine(`lastr:${last.id}:${last.updated_at}`, last.lifecycle === "blocked" ? "cs-err" : "cs-ok",
           `${last.lifecycle === "blocked" || last.lifecycle === "stalled" ? "✖" : "✔"} ${plain(last.report_headline || last.result_preview || last.lifecycle || "")}`)));
