@@ -305,7 +305,7 @@ function radar(orders) {
     const x = 64 + Math.cos(a) * dist;
     const y = 64 + Math.sin(a) * dist;
     const color = e.action === "needs_anthony" ? "#ff5a52" : hudColor(e.state);
-    return svg("g", { class: "hud-blip", "data-id": e.id, tabindex: 0, role: "button",
+    return svg("g", { class: "hud-blip", "data-id": e.id, "data-key": `blip:${e.id}`, tabindex: 0, role: "button",
       "aria-label": `${e.state} ${e.wo !== null ? `WO ${e.wo}` : ""} ${e.title}` },
       svg("circle", { cx: x, cy: y, r: e.action === "needs_anthony" ? 3.8 : 2.6, fill: color }),
       svg("circle", { cx: x, cy: y, r: 6, fill: "none", stroke: color, class: "hud-ping" }),
