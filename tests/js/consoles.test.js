@@ -34,3 +34,21 @@ test("the feed filters keep only their messages", () => {
   assert.deepEqual(keep("claude"), [toClaude, blocked, cleared]);
   assert.deepEqual(keep("blocked"), [blocked]); // a blocked report MAC has since cleared is history
 });
+
+test("every open order sits in exactly one column, so the columns add up", () => {
+  const box = { plain: (t) => String(t || ""), revealOrder: () => {} };
+  box.el = (tag, props, ...kids) => ({ tag, props: props || {}, kids: kids.flat().filter((k) => k !== null && k !== undefined) });
+  vm.runInNewContext(pick("function orderColumns(") + "\nthis.orderColumns = orderColumns;", box);
+  const orders = [
+    { id: "a", wo: 1, title: "needs", state: "OPEN", action: "needs_anthony" },
+    { id: "b", wo: 2, title: "parked but marked running", state: "PARKED", action: "in_progress" },
+    { id: "c", wo: 3, title: "running and queued", state: "RUNNING", action: "queued" },
+    { id: "d", wo: 4, title: "open, other action", state: "OPEN", action: "something_else" },
+    { id: "e", wo: 5, title: "queued", state: "OPEN", action: "queued" },
+  ];
+  const cols = box.orderColumns(orders).kids;
+  const count = (col) => Number(col.kids[0].kids[1].kids[0]); // h3 > span > text
+  const byName = Object.fromEntries(cols.map((c) => [c.kids[0].kids[0], count(c)]));
+  assert.deepEqual(byName, { "NEEDS YOU": 1, RUNNING: 1, QUEUED: 2, PARKED: 1 });
+  assert.equal(Object.values(byName).reduce((a, b) => a + b, 0), orders.length);
+});

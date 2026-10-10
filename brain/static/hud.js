@@ -49,13 +49,15 @@ function kpis(items) {
 
 // ---------- claude.exec: the live code stream ----------
 
-const streamSeen = new Set();
+// Lines shown last time; a line not in it types itself in. Rebuilt every render, so it never grows.
+let streamSeen = new Set();
+let streamNow = new Set();
 let streamPrimed = false;
 
 function streamLine(key, cls, ...parts) {
   const fresh = streamPrimed && !streamSeen.has(key);
-  streamSeen.add(key);
-  return el("div", { class: `cs-line ${cls}${fresh ? " cs-new" : ""}` }, ...parts);
+  streamNow.add(key);
+  return el("span", { class: `cs-line ${cls}${fresh ? " cs-new" : ""}` }, ...parts);
 }
 
 function prompt(who, job, extra) {
@@ -65,6 +67,7 @@ function prompt(who, job, extra) {
 
 // What Claude is doing now, as a terminal: each running job's prompt and its latest tool calls and words.
 function codeStream(jobs) {
+  streamNow = new Set();
   const blocks = [];
   const running = jobs.filter((j) => j.state === "running" || j.state === "waiting");
   for (const j of running.slice(0, 2)) {
@@ -76,7 +79,7 @@ function codeStream(jobs) {
         : streamLine(k, "cs-said", el("span", { class: "cs-comment" }, `# ${a.text || ""}`)));
     }
     if (!(j.activity || []).length) lines.push(streamLine(`w:${j.id}`, "cs-said", el("span", { class: "cs-comment" }, j.kind === "oneshot" ? "# waiting for the result" : "# starting…")));
-    blocks.push(el("button", { type: "button", class: "cs-block", title: `${j.id}: open the job`, onclick: () => openDetail(j.kind, j.id, j.title) }, ...lines));
+    blocks.push(el("button", { type: "button", class: "cs-block", "data-key": `cs:${j.id}`, title: `${j.id}: open the job`, onclick: () => openDetail(j.kind, j.id, j.title) }, ...lines));
   }
   const beat = snap.windows || {};
   if (beat.fresh && beat.job) {
@@ -87,14 +90,15 @@ function codeStream(jobs) {
   if (!blocks.length) {
     const last = jobs.find((j) => ["done", "resolved", "blocked", "stalled"].includes(j.lifecycle));
     if (last) {
-      blocks.push(el("button", { type: "button", class: "cs-block cs-past", onclick: () => openDetail(last.kind, last.id, last.title) },
+      blocks.push(el("button", { type: "button", class: "cs-block cs-past", "data-key": `cs:${last.id}`, onclick: () => openDetail(last.kind, last.id, last.title) },
         streamLine(`last:${last.id}`, "cs-prompt", ...prompt("claude@mac", last.id, "last run")),
         streamLine(`lastr:${last.id}:${last.updated_at}`, last.lifecycle === "blocked" ? "cs-err" : "cs-ok",
           `${last.lifecycle === "blocked" || last.lifecycle === "stalled" ? "✖" : "✔"} ${plain(last.report_headline || last.result_preview || last.lifecycle || "")}`)));
     }
   }
   streamPrimed = true;
-  const idle = el("div", { class: "cs-line cs-prompt cs-idle" }, ...prompt("claude@mac", running.length ? "…" : "idle"), el("span", { class: "cs-cursor", "aria-hidden": "true" }));
+  streamSeen = streamNow;
+  const idle = el("span", { class: "cs-line cs-prompt cs-idle" }, ...prompt("claude@mac", running.length ? "…" : "idle"), el("span", { class: "cs-cursor", "aria-hidden": "true" }));
   return el("div", { class: "cs", role: "log", "aria-label": "What Claude is doing now" }, ...blocks, idle);
 }
 
@@ -105,27 +109,38 @@ function codeStream(jobs) {
 function heatStrip() {
   const t = snap.timeline;
   if (!t) return null;
-  const now = Date.now(), from = now - DAY_MS, hour = 3600000;
+  // 24 clock hours, the last one still running: each cell is 3 PM–4 PM, not a rolling hour.
+  const now = Date.now(), hour = 3600000, from = Math.floor(now / hour) * hour - 23 * hour;
+  // Windows' row has its Claude jobs and the Codex picture jobs that run there.
   const rows = [["claude", "CLAUDE", [255, 150, 40]], ["windows", "WINDOWS", [167, 139, 250]]];
   const W = 24 * 9, cells = [];
   rows.forEach(([key, name, rgb], r) => {
-    const bars = (t.lanes[key] || []).map((b) => ({ ...b, s: b.start ? Date.parse(b.start) : Date.parse(b.end), e: b.end ? Date.parse(b.end) : now }));
+    const time = (iso, fallback) => { const v = Date.parse(iso || ""); return Number.isNaN(v) ? fallback : v; };
+    const bars = ((t.lanes || {})[key] || []).map((b) => {
+      const e = time(b.end, now);
+      return { ...b, s: time(b.start, e), e };
+    });
     cells.push(svg("text", { x: 0, y: 9 + r * 14, class: "hs-name" }, name));
     for (let i = 0; i < 24; i++) {
       const h0 = from + i * hour, h1 = h0 + hour;
       const on = bars.filter((b) => b.s < h1 && b.e >= h0);
       const blocked = bars.filter((b) => b.state === "blocked" && b.end && b.e >= h0 && b.e < h1);
       const a = on.length ? 0.22 + Math.min(1, on.length / 3) * 0.7 : 0.06;
-      const label = `${new Date(h0).toLocaleTimeString([], { hour: "numeric" })}: ${on.length ? on.map((b) => b.label).slice(0, 6).join(", ") : "nothing running"}${blocked.length ? ` · blocked: ${blocked.map((b) => b.label).join(", ")}` : ""}`;
+      const span = `${new Date(h0).toLocaleTimeString([], { hour: "numeric" })}–${new Date(h1).toLocaleTimeString([], { hour: "numeric" })}`;
+      const label = `${name} ${span}: ${on.length ? on.map((b) => b.label).slice(0, 6).join(", ") : "nothing running"}${blocked.length ? ` · blocked: ${blocked.map((b) => b.label).join(", ")}` : ""}`;
       cells.push(svg("rect", { x: 56 + i * 9, y: r * 14, width: 8, height: 11, rx: 2, fill: `rgba(${rgb.join(",")},${a.toFixed(2)})`, class: "hs-cell" }, tip(label)));
       if (blocked.length) cells.push(svg("circle", { cx: 60 + i * 9, cy: r * 14 + 5.5, r: 2, fill: "#ff5a52" }, tip(label)));
     }
   });
   const fig = el("button", {
     type: "button", class: "hs", "aria-label": "Jobs per hour over the last 24 hours. Open the timeline.",
-    onclick: () => { ui.activeView = "timeline"; ui.tlHours = 24; renderRunning(); document.getElementById("running-panel").scrollIntoView({ behavior: "smooth", block: "start" }); },
+    "data-key": "hs",
+    onclick: () => {
+      ui.activeView = "timeline"; ui.tlHours = 24;
+      store.set("brain-active-view", "timeline"); store.set("brain-tl-hours", "24");
+      renderRunning(); document.getElementById("running-panel").scrollIntoView({ behavior: "smooth", block: "start" }); },
   }, svg("svg", { viewBox: `0 0 ${56 + W} 28`, role: "img", "aria-hidden": "true" }, ...cells),
-  el("span", { class: "hs-cap" }, "last 24 h · brighter = busier · red = ended blocked · click for the timeline"));
+  el("span", { class: "hs-cap" }, "last 24 h · brighter = busier · red = ended blocked · Windows row includes Codex · click for the timeline"));
   return fig;
 }
 
@@ -135,7 +150,7 @@ function outcomes(jobs) {
   if (!list.length) return null;
   return el("ol", { class: "oc" }, list.map((j) => {
     const bad = j.lifecycle === "blocked" || j.lifecycle === "stalled";
-    return el("li", {}, el("button", { type: "button", class: "oc-row", onclick: () => openDetail(j.kind, j.id, j.title) },
+    return el("li", {}, el("button", { type: "button", class: "oc-row", "data-key": `oc:${j.kind}:${j.id}`, onclick: () => openDetail(j.kind, j.id, j.title) },
       el("span", { class: `oc-mark ${bad ? "bad" : "ok"}` }, bad ? "✖" : "✔"),
       el("span", { class: "oc-id" }, j.id),
       el("span", { class: "oc-txt" }, plain(j.owner_mark ? j.action_note : j.report_headline || j.title || "")),
@@ -162,13 +177,14 @@ function buildWire() {
   for (const [key, [, , d]] of Object.entries(WIRE.links)) {
     const path = svg("path", { id: `wire-${key}`, d, class: "wr-link" });
     wirePaths[key] = path;
-    g.push(svg("g", { class: `wr-l wr-l-${key}`, "data-link": key, tabindex: 0, role: "button" },
+    const ends = { claude: "Claude and MAC", windows: "MAC and Windows", codex: "Codex and MAC" }[key];
+    g.push(svg("g", { class: `wr-l wr-l-${key}`, "data-link": key, tabindex: 0, role: "button", "aria-pressed": "false", "aria-label": `Messages between ${ends}: show them` },
       svg("path", { d, class: "wr-hit" }), path, svg("path", { d, class: "wr-flow" }),
       svg("text", { class: "wr-count", "data-count": key, "text-anchor": "middle" })));
   }
   for (const [key, [x, y, name, color]] of Object.entries(WIRE.nodes)) {
     const r = key === "codex" ? 15 : 27;
-    g.push(svg("g", { class: `wr-n wr-n-${key}`, "data-node": key, tabindex: 0, role: "button", "aria-label": `${name}: show its messages` },
+    g.push(svg("g", { class: `wr-n wr-n-${key}`, "data-node": key, tabindex: 0, role: "button", "aria-pressed": "false", "aria-label": key === "mac" ? "MAC: show all messages" : `${name}: show its messages` },
       svg("circle", { cx: x, cy: y, r: r + 6, class: "wr-halo", stroke: color }),
       svg("circle", { cx: x, cy: y, r, class: "wr-core", stroke: color }),
       svg("text", { x, y: y + 4, class: "wr-name", fill: color, "text-anchor": "middle" }, name),
@@ -196,13 +212,18 @@ function updateWire(messages) {
     const busy = hour.some((m) => linkOf(m) === key);
     const label = key === "codex" ? `${ms.length} today` : `▶ ${out}  ◀ ${back}`;
     const text = wireSvg.querySelector(`[data-count="${key}"]`);
-    // Codex's count sits beside its node, clear of MAC's label; the others ride above the middle of their link.
-    const p = wirePaths[key].getPointAtLength(wirePaths[key].getTotalLength() * (key === "codex" ? 0.15 : 0.5));
-    text.setAttribute("x", (p.x + (key === "codex" ? 52 : 0)).toFixed(0));
-    text.setAttribute("y", (p.y + (key === "codex" ? 4 : -9)).toFixed(0));
+    if (!text.hasAttribute("x")) {
+      // Placed once (the paths never move). Codex's count sits beside its node, clear of MAC's label; the others ride
+      // above the middle of their link.
+      const p = wirePaths[key].getPointAtLength(wirePaths[key].getTotalLength() * (key === "codex" ? 0.15 : 0.5));
+      text.setAttribute("x", (p.x + (key === "codex" ? 52 : 0)).toFixed(0));
+      text.setAttribute("y", (p.y + (key === "codex" ? 4 : -9)).toFixed(0));
+    }
     text.textContent = label;
-    wireSvg.querySelector(`.wr-l-${key}`).classList.toggle("busy", busy);
-    wireSvg.querySelector(`.wr-l-${key}`).classList.toggle("on", ui.commsFilter === key);
+    const g = wireSvg.querySelector(`.wr-l-${key}`);
+    g.classList.toggle("busy", busy);
+    g.classList.toggle("on", ui.commsFilter === key);
+    g.setAttribute("aria-pressed", String(ui.commsFilter === key));
   }
   const counts = { claude: 0, mac: 0, windows: 0, codex: 0 };
   for (const m of hour) {
@@ -212,20 +233,27 @@ function updateWire(messages) {
   }
   for (const key of Object.keys(WIRE.nodes)) {
     wireSvg.querySelector(`[data-sub="${key}"]`).textContent = `${counts[key]} · last hour`;
-    wireSvg.querySelector(`.wr-n-${key}`).classList.toggle("on", ui.commsFilter === key || (key === "mac" && ui.commsFilter === "all"));
+    const on = ui.commsFilter === key || (key === "mac" && ui.commsFilter === "all");
+    const n = wireSvg.querySelector(`.wr-n-${key}`);
+    n.classList.toggle("on", on);
+    n.setAttribute("aria-pressed", String(on));
   }
 }
 
 // A message travels along its link as a packet in its job's colour; with Calm on, the receiving station glows.
 function firePacket(m) {
   if (!wireSvg || !m) return;
-  const link = linkOf(m);
-  const far = link === "codex" ? "codex" : link;              // the station at the other end from MAC
-  const sender = m.direction === "to_claude" ? "mac" : far;   // codex and replies come in to MAC
-  const receiver = sender === "mac" ? far : "mac";
+  const link = linkOf(m);                                      // also the station at the far end from MAC
+  const sender = m.direction === "to_claude" ? "mac" : link;  // codex and replies come in to MAC
+  const receiver = sender === "mac" ? link : "mac";
   const forward = WIRE.links[link][0] === sender;             // each path is drawn from links[key][0] to [1]
   const node = wireSvg.querySelector(`.wr-n-${receiver}`);
-  if (node) { node.classList.remove("hit"); void node.getBoundingClientRect(); node.classList.add("hit"); }
+  if (node) {
+    // The receiving station lights up for 1.2 s: a plain class, so it shows with Calm on too (no animation needed).
+    node.classList.add("hit");
+    clearTimeout(node.hitTimer);
+    node.hitTimer = setTimeout(() => node.classList.remove("hit"), 1200);
+  }
   if (calmMotion()) return;
   const key = window.BrainsVisual && brains ? brains.keyOf(m) : null;
   const color = (key && window.Volley.jobColor(key)) || "#e8f6ff";
@@ -239,7 +267,7 @@ function firePacket(m) {
 
 function setCommsFilter(key) {
   ui.commsFilter = ui.commsFilter === key ? "all" : key;
-  renderCommsFilters();
+  keepFocus(() => renderCommsFilters());
   updateWire(snap.messages || []);
   if (typeof renderTerminal === "function") renderTerminal();
 }
@@ -257,10 +285,10 @@ function commsMatch(m) {
 function renderCommsFilters() {
   const box = document.getElementById("comms-filters");
   if (!box) return;
-  const ms = snap.messages || [];
+  const ms = (snap.messages || []).filter((m) => m.at && matches(m.text, m.kind));   // what the feed can show
   box.replaceChildren(...COMMS_FILTERS.map(([key, label]) => {
     const n = key === "all" ? ms.length : ms.filter((m) => (key === "blocked" ? m.blocked && !m.cleared : linkOf(m) === key)).length;
-    return el("button", { type: "button", class: `cf${(ui.commsFilter || "all") === key ? " on" : ""}`, "aria-pressed": String((ui.commsFilter || "all") === key), onclick: () => setCommsFilter(key) },
+    return el("button", { type: "button", "data-key": `cf:${key}`, class: `cf${(ui.commsFilter || "all") === key ? " on" : ""}`, "aria-pressed": String((ui.commsFilter || "all") === key), onclick: () => setCommsFilter(key) },
       label, el("span", { class: "cf-n" }, String(n)));
   }));
 }
@@ -304,17 +332,16 @@ function radar(orders) {
 
 // The orders as four columns: what needs Anthony, what runs, what waits, what is parked.
 function orderColumns(orders) {
-  const cols = [
-    ["needs", "NEEDS YOU", orders.filter((e) => e.action === "needs_anthony")],
-    ["run", "RUNNING", orders.filter((e) => e.action !== "needs_anthony" && (e.state === "RUNNING" || e.action === "in_progress"))],
-    ["queue", "QUEUED", orders.filter((e) => e.action === "queued" && e.state !== "PARKED")],
-    ["park", "PARKED", orders.filter((e) => e.state === "PARKED" && e.action !== "needs_anthony")],
-  ];
+  // Each order goes in exactly one column, so the columns add up to the open-orders number above.
+  const column = (e) => e.action === "needs_anthony" ? "needs" : e.state === "PARKED" ? "park"
+    : e.state === "RUNNING" || e.action === "in_progress" ? "run" : "queue";
+  const cols = [["needs", "NEEDS YOU"], ["run", "RUNNING"], ["queue", "QUEUED"], ["park", "PARKED"]]
+    .map(([key, name]) => [key, name, orders.filter((e) => column(e) === key)]);
   const label = (e) => (e.wo !== null ? `#${String(e.wo).padStart(3, "0")}` : plain(e.title).slice(0, 14));
   return el("div", { class: "kb" }, cols.map(([cls, name, list]) => el("section", { class: `kb-col kb-${cls}` },
     el("h3", {}, name, el("span", {}, String(list.length))),
     list.length ? el("ul", {}, list.slice(0, 5).map((e) => el("li", {}, el("button", {
-      type: "button", class: "kb-chip", title: `${plain(e.title)}${e.action_note ? ` · ${e.action_note}` : ""}`,
+      type: "button", class: "kb-chip", "data-key": `kb:${e.id}`, title: `${plain(e.title)}${e.action_note ? ` · ${e.action_note}` : ""}`,
       onclick: () => revealOrder(e.id),
     }, el("b", {}, label(e)), el("span", {}, plain(e.title).replace(/^WO from MAC\s*#?\s*\d*\s*[-—–:]\s*/, "")))))) : el("p", { class: "kb-none" }, "none"),
     list.length > 5 ? el("p", { class: "kb-more" }, `+${list.length - 5} more`) : null)));
@@ -322,7 +349,21 @@ function orderColumns(orders) {
 
 // ---------- panels ----------
 
-function renderHud(s) {
+// The consoles are rebuilt on every update: put keyboard focus back on the same control, and keep the code stream
+// where it was scrolled.
+function keepFocus(render) {
+  const active = document.activeElement;
+  const key = active && active.closest && active.closest(".consoles") ? active.getAttribute("data-key") : null;
+  const stream = document.querySelector("#hud-claude .cs");
+  const scroll = stream ? stream.scrollTop : null;
+  render();
+  if (scroll !== null) { const fresh = document.querySelector("#hud-claude .cs"); if (fresh) fresh.scrollTop = scroll; }
+  if (key) { const again = document.querySelector(`.consoles [data-key="${CSS.escape(key)}"]`); if (again) again.focus({ preventScroll: true }); }
+}
+
+function renderHud(s) { keepFocus(() => drawHud(s)); }
+
+function drawHud(s) {
   const jobs = allJobs();
   const day = jobs.filter((j) => ageMs(j.updated_at) < DAY_MS);
   const finished = day.filter((j) => typeof j.duration_s === "number");

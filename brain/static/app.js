@@ -1584,7 +1584,8 @@ function renderLearning() {
 
 function renderAll() {
   if (!snap) return;
-  if (window.renderHud) window.renderHud(snap);
+  // A console problem must never blank the rest of the page.
+  try { if (window.renderHud) window.renderHud(snap); } catch (err) { console.error("consoles:", err); }
   renderStatus();
   renderHero();
   renderTerminal();
