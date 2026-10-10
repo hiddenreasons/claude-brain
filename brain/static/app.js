@@ -1248,17 +1248,25 @@ function popupMark(node) {
   return remote ? markControl("remote", key, remote) : null;
 }
 
-// Anything waiting on Anthony links to VADER, where he acts on it. VADER can't open a given page from a link
-// yet (it reopens the last page), so the button says which tab to go to.
+// Anything waiting on Anthony links to VADER, where he acts on it. The link opens the tab the button names
+// (VADER reads ?page= on its first load); a tab with no VADER page name gets plain VADER.
 const VADER_URL = "http://localhost:8765/";
+const VADER_PAGES = { "Produce → Review": "review", "System · protected changes": "system", "Topics": "topics", "Home · Needs you": "home" };
+function vaderHref(text) {
+  const page = VADER_PAGES[vaderWhere(text)];
+  return page ? `${VADER_URL}?page=${page}` : VADER_URL;
+}
 function vaderWhere(text) {
+  // Protected-change words first: "danger_guard … --review" is System, not the Review page. A bare "approve" stays after
+  // the review words, so "approve the Short 71 video" still goes to Review, where videos are approved.
+  if (/(danger_guard|\bprotected\b|--review\b)/i.test(text)) return "System · protected changes";
   if (/\b(review|judge|watch|re-?render|final|teaser|short|video)\b/i.test(text)) return "Produce → Review";
-  if (/\b(danger_guard|protected|--review|approv)/i.test(text)) return "System · protected changes";
+  if (/\bapprov/i.test(text)) return "System · protected changes";
   if (/\btopic/i.test(text)) return "Topics";
   return "Home · Needs you";
 }
 function vaderLink(text) {
-  return el("a", { class: "ds-more ds-vader", href: VADER_URL, target: "vader", rel: "noopener" }, `Open VADER ↗ · ${vaderWhere(text)}`);
+  return el("a", { class: "ds-more ds-vader", href: vaderHref(text), target: "vader", rel: "noopener" }, `Open VADER ↗ · ${vaderWhere(text)}`);
 }
 
 // VADER's node terminal: a small macOS-style window next to the node. Only NEEDS ANTHONY gets a fix request.
