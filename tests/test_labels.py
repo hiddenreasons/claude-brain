@@ -140,3 +140,12 @@ def test_only_needs_anthony_items_are_alertable(tree):
     for item in snap["folders"] + snap["oneshots"] + snap["inbox"]:
         assert item["alertable"] == (item["action"] == "needs_anthony"), item.get("id")
     assert {e["state"]: e["action"] for e in snap["inbox"]}["PARKED"] == "queued"
+
+
+# brain/static/hud.js orderColumns relies on these pairs (it checks BLOCKED before needs_anthony; its tests use them).
+@pytest.mark.parametrize(
+    "state, action",
+    [("BLOCKED", "needs_anthony"), ("DONE", "done"), ("NOTE", "done"), ("PARKED", "queued"), ("OPEN", "queued"), ("RUNNING", "in_progress")],
+)
+def test_the_actions_the_order_columns_rely_on(state, action):
+    assert order_action(order(state))["action"] == action

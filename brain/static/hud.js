@@ -330,16 +330,40 @@ function radar(orders) {
   );
 }
 
-// The orders as four columns: what needs Anthony, what runs, what waits, what is parked.
-function orderColumns(orders) {
-  // Each order goes in exactly one column, so the columns add up to the open-orders number above.
-  const column = (e) => e.action === "needs_anthony" ? "needs" : e.state === "PARKED" ? "park"
+// Orders marked DONE whose header date is today or one of the two days before (calendar days, so the list does not
+// change at noon). The date is the one the order was OPENED under: the inbox keeps no finish date (replies carry no
+// time either), so the column says "opened in the last 3 days" and never claims a finish time. Newest first.
+function recentDone(inbox, now = new Date()) {
+  const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const today = midnight(now);
+  const age = (e) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(e.date || "");
+    return m ? Math.round((today - new Date(+m[1], +m[2] - 1, +m[3]).getTime()) / DAY_MS) : NaN;
+  };
+  return inbox.filter((e) => e.state === "DONE" && age(e) >= 0 && age(e) <= 2).sort((x, y) => age(x) - age(y));
+}
+
+// Orders waiting on Anthony and not stuck: a blocked order sits in BLOCKED, so the "waiting on you" number leaves it out
+// and matches the NEEDS YOU column.
+function needsYouOrders(open) {
+  return open.filter((e) => e.action === "needs_anthony" && e.state !== "BLOCKED");
+}
+
+// The orders as six columns: what needs Anthony, what is blocked, what runs, what waits, what is parked, what
+// is recently done. `orders` are the open ones; `done` the recent done ones.
+function orderColumns(orders, done = []) {
+  // Each open order goes in exactly one column, so the first five add up to the open-orders number above.
+  // labels.order_action gives EVERY blocked order the action needs_anthony (tests/test_labels.py pins that), so
+  // the blocked check has to come first or the BLOCKED column would always be empty.
+  const column = (e) => e.state === "BLOCKED" ? "block" : e.action === "needs_anthony" ? "needs" : e.state === "PARKED" ? "park"
     : e.state === "RUNNING" || e.action === "in_progress" ? "run" : "queue";
-  const cols = [["needs", "NEEDS YOU"], ["run", "RUNNING"], ["queue", "QUEUED"], ["park", "PARKED"]]
+  const cols = [["needs", "NEEDS YOU"], ["block", "BLOCKED"], ["run", "RUNNING"], ["queue", "QUEUED"], ["park", "PARKED"]]
     .map(([key, name]) => [key, name, orders.filter((e) => column(e) === key)]);
+  cols.push(["done", "DONE", done]);
   const label = (e) => (e.wo !== null ? `#${String(e.wo).padStart(3, "0")}` : plain(e.title).slice(0, 14));
   return el("div", { class: "kb" }, cols.map(([cls, name, list]) => el("section", { class: `kb-col kb-${cls}` },
-    el("h3", {}, name, el("span", {}, String(list.length))),
+    el("h3", {}, el("span", { class: "kb-name" }, name), el("span", {}, String(list.length))),
+    cls === "done" ? el("p", { class: "kb-note" }, "opened in the last 3 days") : null,
     list.length ? el("ul", {}, list.slice(0, 5).map((e) => el("li", {}, el("button", {
       type: "button", class: "kb-chip", "data-key": `kb:${e.id}`, title: `${plain(e.title)}${e.action_note ? ` · ${e.action_note}` : ""}`,
       onclick: () => revealOrder(e.id),
@@ -389,7 +413,7 @@ function drawHud(s) {
 
   const open = s.inbox.filter((e) => e.action !== "done" && e.state !== "NOTE");
   const comms = s.comms || { events: 0 };
-  const needs = openDecisions().length + open.filter((e) => e.action === "needs_anthony").length;
+  const needs = openDecisions().length + needsYouOrders(open).length;
   document.getElementById("hud-mac").replaceChildren(
     hudHead("mac.command", comms.events ? `grok bot · log ${comms.events} events` : "grok bot · log not started"),
     kpis([
@@ -397,7 +421,7 @@ function drawHud(s) {
       [open.length, "open orders", "info"],
       [open.filter((e) => e.state === "BLOCKED").length, "blocked", open.some((e) => e.state === "BLOCKED") ? "bad" : "ok"],
     ]),
-    el("div", { class: "hud-row mc-row" }, radar(open.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state))), orderColumns(open)),
+    el("div", { class: "hud-row mc-row" }, radar(open.filter((e) => ["OPEN", "BLOCKED", "RUNNING"].includes(e.state))), orderColumns(open, recentDone(s.inbox))),
   );
 
   const wireBox = document.getElementById("comms-wire");

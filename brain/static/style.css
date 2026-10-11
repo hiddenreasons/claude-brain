@@ -1006,10 +1006,12 @@ html.calm .wr-halo { animation: none; }
 .mc-row .hud-radar svg { width: 128px; height: 128px; }
 .kb { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .kb-col { min-width: 0; padding: 6px 7px; border-radius: 6px; border: 1px solid rgba(var(--wire-rgb), 0.14); background: rgba(0, 0, 0, 0.28); }
-.kb-col h3 { display: flex; justify-content: space-between; margin: 0 0 5px; font: 700 9px/1 var(--mono); letter-spacing: 0.12em; color: var(--dim); }
-.kb-col h3 span { color: #eef6fa; }
+.kb-col h3 { display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; margin: 0 0 5px; font: 700 9px/1 var(--mono); letter-spacing: 0.12em; color: var(--dim); }
+.kb-col h3 span { color: #eef6fa; flex: none; }
+.kb-col h3 .kb-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: inherit; }
 .kb-needs { border-color: rgba(229, 72, 77, 0.5); background: rgba(229, 72, 77, 0.07); } .kb-needs h3 { color: #ff8a80; }
 .kb-run h3 { color: #3fe58f; } .kb-queue h3 { color: var(--mac); }
+.kb-block { border-color: rgba(255, 123, 128, 0.35); } .kb-block h3 { color: #ff7b80; } .kb-done h3 { color: #9fe8c4; }
 .kb-col ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .kb-chip {
   display: flex; gap: 6px; width: 100%; padding: 3px 5px; border: 0; border-radius: 4px; background: rgba(255, 255, 255, 0.04);
@@ -1018,5 +1020,14 @@ html.calm .wr-halo { animation: none; }
 .kb-chip:hover, .kb-chip:focus-visible { background: rgba(255, 255, 255, 0.1); outline: none; }
 .kb-chip b { flex: none; color: #fff; }
 .kb-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: var(--ui); }
+.kb-note { margin: 6px 0 0; font-size: 9.5px; letter-spacing: 0.04em; color: var(--dim); }
 .kb-none, .kb-more { margin: 0; font-size: 10.5px; color: var(--dim); }
 @media (max-width: 1100px) { .consoles { grid-template-columns: minmax(0, 1fr); } }
+/* Phones: the radar sits above the columns, and the columns take the panel's whole width. */
+@media (max-width: 480px) {
+  .mc-row { flex-direction: column; align-items: stretch; }
+  .mc-row .hud-radar { align-self: center; }
+  .kb { flex: none; width: 100%; }
+  .kb-chip { flex-direction: column; gap: 0; }   /* the number on top, the title under it with the whole chip's width */
+  .kb-chip b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
